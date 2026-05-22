@@ -49,10 +49,21 @@ export interface IStorage {
   }): Promise<number>;
   getAvailableYears(examBodyId?: number, subjectId?: number): Promise<number[]>;
   createQuestion(question: InsertQuestion): Promise<Question>;
+  updateQuestion(id: number, updates: Partial<InsertQuestion>): Promise<Question | undefined>;
+  deleteQuestion(id: number): Promise<boolean>;
 
   // Study tips
   getStudyTips(subjectId: number, topicId?: number): Promise<StudyTip[]>;
+  getAllStudyTips(): Promise<StudyTip[]>;
   createStudyTip(tip: InsertStudyTip): Promise<StudyTip>;
+  updateStudyTip(id: number, updates: Partial<InsertStudyTip>): Promise<StudyTip | undefined>;
+  deleteStudyTip(id: number): Promise<boolean>;
+
+  // Topic mutations
+  deleteTopic(id: number): Promise<boolean>;
+
+  // Subject mutations
+  updateSubject(id: number, updates: Partial<InsertSubject>): Promise<Subject | undefined>;
 
   // Quiz sessions
   getQuizSessions(): Promise<QuizSession[]>;
@@ -162,6 +173,37 @@ export class DatabaseStorage implements IStorage {
 
   async createQuestion(question: InsertQuestion): Promise<Question> {
     return db.insert(questions).values(question).returning().get();
+  }
+
+  async updateQuestion(id: number, updates: Partial<InsertQuestion>): Promise<Question | undefined> {
+    return db.update(questions).set(updates).where(eq(questions.id, id)).returning().get();
+  }
+
+  async deleteQuestion(id: number): Promise<boolean> {
+    const result = db.delete(questions).where(eq(questions.id, id)).run();
+    return result.changes > 0;
+  }
+
+  async getAllStudyTips(): Promise<StudyTip[]> {
+    return db.select().from(studyTips).all();
+  }
+
+  async updateStudyTip(id: number, updates: Partial<InsertStudyTip>): Promise<StudyTip | undefined> {
+    return db.update(studyTips).set(updates).where(eq(studyTips.id, id)).returning().get();
+  }
+
+  async deleteStudyTip(id: number): Promise<boolean> {
+    const result = db.delete(studyTips).where(eq(studyTips.id, id)).run();
+    return result.changes > 0;
+  }
+
+  async deleteTopic(id: number): Promise<boolean> {
+    const result = db.delete(topics).where(eq(topics.id, id)).run();
+    return result.changes > 0;
+  }
+
+  async updateSubject(id: number, updates: Partial<InsertSubject>): Promise<Subject | undefined> {
+    return db.update(subjects).set(updates).where(eq(subjects.id, id)).returning().get();
   }
 
   async getStudyTips(subjectId: number, topicId?: number): Promise<StudyTip[]> {

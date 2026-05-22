@@ -1,6 +1,17 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+
+// Admin password (set via env, falls back to default for dev)
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "emy#olu@9988";
+
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const pass = req.header("x-admin-password") || req.query.admin_password;
+  if (pass !== ADMIN_PASSWORD) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -91,6 +102,128 @@ export async function registerRoutes(
     if (!session) return res.status(404).json({ message: "Session not found" });
     res.json(session);
   });
+
+  // ============ ADMIN ROUTES (password protected) ============
+
+  // Verify admin password
+  app.post("/api/admin/verify", (req, res) => {
+    const { password } = req.body;
+    if (password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ ok: false });
+    }
+    res.json({ ok: true });
+  });
+
+  // Admin: list all study tips (without subjectId filter)
+  app.get("/api/admin/study-tips", requireAdmin, async (_req, res) => {
+    const tips = await storage.getAllStudyTips();
+    res.json(tips);
+  });
+
+  // Admin: list all topics (across all subjects)
+  app.get("/api/admin/topics", requireAdmin, async (_req, res) => {
+    const subjs = await storage.getSubjects();
+    const all = [];
+    for (const s of subjs) {
+      const ts = await storage.getTopics(s.id);
+      all.push(...ts);
+    }
+    res.json(all);
+  });
+
+  // Question CRUD
+  app.post("/api/admin/questions", requireAdmin, async (req, res) => {
+    try {
+      const q = await storage.createQuestion(req.body);
+      res.json(q);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+  app.patch("/api/admin/questions/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const q = await storage.updateQuestion(id, req.body);
+    if (!q) return res.status(404).json({ message: "Not found" });
+    res.json(q);
+  });
+  app.delete("/api/admin/questions/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const ok = await storage.deleteQuestion(id);
+    if (!ok) return res.status(404).json({ message: "Not found" });
+    res.json({ ok: true });
+  });
+
+  // Bulk question import (array of questions)
+  app.post("/api/admin/questions/bulk", requireAdmin, async (req, res) => {
+    const items = Array.isArray(req.body) ? req.body : [];
+    let created = 0;
+    const errors: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      try {
+        await storage.createQuestion(items[i]);
+        created++;
+      } catch (e: any) {
+        errors.push(`Row ${i + 1}: ${e.message}`);
+      }
+    }
+    res.json({ created, total: items.length, errors });
+  });
+
+  // Study tip CRUD
+  app.post("/api/admin/study-tips", requireAdmin, async (req, res) => {
+    try {
+      const t = await storage.createStudyTip(req.body);
+      res.json(t);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+  app.patch("/api/admin/study-tips/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const t = await storage.updateStudyTip(id, req.body);
+    if (!t) return res.status(404).json({ message: "Not found" });
+    res.json(t);
+  });
+  app.delete("/api/admin/study-tips/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const ok = await storage.deleteStudyTip(id);
+    if (!ok) return res.status(404).json({ message: "Not found" });
+    res.json({ ok: true });
+  });
+
+  // Subject create/update
+  app.post("/api/admin/subjects", requireAdmin, async (req, res) => {
+    try {
+      const s = await storage.createSubject(req.body);
+      res.json(s);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+  app.patch("/api/admin/subjects/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const s = await storage.updateSubject(id, req.body);
+    if (!s) return res.status(404).json({ message: "Not found" });
+    res.json(s);
+  });
+
+  // Topic create/delete
+  app.post("/api/admin/topics", requireAdmin, async (req, res) => {
+    try {
+      const t = await storage.createTopic(req.body);
+      res.json(t);
+    } catch (e: any) {
+      res.status(400).json({ message: e.message });
+    }
+  });
+  app.delete("/api/admin/topics/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(req.params.id);
+    const ok = await storage.deleteTopic(id);
+    if (!ok) return res.status(404).json({ message: "Not found" });
+    res.json({ ok: true });
+  });
+
+  // ============ END ADMIN ROUTES ============
 
   // Stats endpoint
   app.get("/api/stats", async (_req, res) => {

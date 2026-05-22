@@ -213,6 +213,13 @@ export default function Home() {
         <p className="text-xs text-muted-foreground mb-2">
           Harmony Digital Consults Ltd &mdash; Empowering students for exam success
         </p>
+        <div className="flex items-center justify-center gap-3 mb-2">
+          <Link href="/admin">
+            <button className="text-[10px] text-muted-foreground hover:text-primary underline-offset-2 hover:underline" data-testid="link-admin">
+              Admin
+            </button>
+          </Link>
+        </div>
         <PerplexityAttribution />
       </footer>
     </div>

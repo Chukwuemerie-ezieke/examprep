@@ -10,6 +10,7 @@ import Practice from "@/pages/practice";
 import CBT from "@/pages/cbt";
 import StudyTips from "@/pages/study-tips";
 import History from "@/pages/history";
+import Admin from "@/pages/admin";
 
 function AppRouter() {
   return (
@@ -19,6 +20,7 @@ function AppRouter() {
       <Route path="/cbt" component={CBT} />
       <Route path="/study-tips" component={StudyTips} />
       <Route path="/history" component={History} />
+      <Route path="/admin" component={Admin} />
       <Route component={NotFound} />
     </Switch>
   );
