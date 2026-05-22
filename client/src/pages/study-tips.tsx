@@ -4,7 +4,8 @@ import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Lightbulb, BookOpen } from "lucide-react";
+import { Lightbulb, BookOpen } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 import { apiRequest } from "@/lib/queryClient";
 import type { Subject, StudyTip } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
@@ -24,17 +25,9 @@ export default function StudyTips() {
 
   return (
     <div className="min-h-screen bg-background">
+      <PageHeader title="Study Tips & Resources" maxWidth="max-w-3xl" />
       <div className="border-b border-border bg-card/50">
         <div className="max-w-3xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-3 mb-4">
-            <Link href="/">
-              <Button variant="ghost" size="sm" className="gap-1.5 -ml-2" data-testid="button-back-home">
-                <ArrowLeft className="w-4 h-4" /> Home
-              </Button>
-            </Link>
-            <h1 className="text-base font-semibold text-foreground">Study Tips &amp; Resources</h1>
-          </div>
-
           <Select value={subjectId} onValueChange={setSubjectId}>
             <SelectTrigger className="h-9 text-sm max-w-xs" data-testid="select-subject">
               <SelectValue placeholder="Select a subject" />

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Clock, Play, CheckCircle2, XCircle, Trophy, RotateCcw, BookOpen } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { ExamBody, Subject, Question, QuizSession } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
@@ -138,18 +139,7 @@ export default function CBT() {
   if (phase === "setup") {
     return (
       <div className="min-h-screen bg-background">
-        <div className="border-b border-border bg-card/50">
-          <div className="max-w-3xl mx-auto px-4 py-4">
-            <div className="flex items-center gap-3">
-              <Link href="/">
-                <Button variant="ghost" size="sm" className="gap-1.5 -ml-2" data-testid="button-back-home">
-                  <ArrowLeft className="w-4 h-4" /> Home
-                </Button>
-              </Link>
-              <h1 className="text-base font-semibold text-foreground">CBT Simulation</h1>
-            </div>
-          </div>
-        </div>
+        <PageHeader title="CBT Simulation" maxWidth="max-w-3xl" />
 
         <div className="max-w-3xl mx-auto px-4 py-8">
           <Card className="border border-border">

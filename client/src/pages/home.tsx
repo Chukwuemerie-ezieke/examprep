@@ -11,6 +11,7 @@ import {
 import type { Stats, ExamBody, Subject } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { Logo } from "@/components/Logo";
+import { InstallButton } from "@/components/InstallButton";
 
 const subjectIcons: Record<string, any> = {
   calculator: Calculator,
@@ -61,6 +62,7 @@ export default function Home() {
                   CBT Simulation
                 </Button>
               </Link>
+              <InstallButton />
             </div>
           </div>
         </div>

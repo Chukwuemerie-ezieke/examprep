@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle2, XCircle, BookOpen, Eye, EyeOff } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, XCircle, BookOpen, Eye, EyeOff } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import type { ExamBody, Subject, Topic, Question } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
+import { PageHeader } from "@/components/PageHeader";
 
 export default function Practice() {
   const [examBodyId, setExamBodyId] = useState("");
@@ -79,18 +80,9 @@ export default function Practice() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
+      <PageHeader title="Study Mode" maxWidth="max-w-5xl" />
       <div className="border-b border-border bg-card/50">
         <div className="max-w-5xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-3 mb-4">
-            <Link href="/">
-              <Button variant="ghost" size="sm" className="gap-1.5 -ml-2" data-testid="button-back-home">
-                <ArrowLeft className="w-4 h-4" />
-                Home
-              </Button>
-            </Link>
-            <h1 className="text-base font-semibold text-foreground">Study Mode</h1>
-          </div>
-
           {/* Filters */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <Select value={examBodyId} onValueChange={setExamBodyId}>
