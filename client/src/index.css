@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* LIGHT MODE - Education theme: deep blue primary, warm surfaces */
+/* LIGHT MODE - Harmony Digital Consults brand: teal primary, gold accent */
 :root {
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
@@ -18,29 +18,29 @@
   --sidebar: 220 25% 14%;
   --sidebar-foreground: 40 15% 95%;
   --sidebar-border: 220 20% 18%;
-  --sidebar-primary: 160 70% 38%;
+  --sidebar-primary: 190 60% 38%;
   --sidebar-primary-foreground: 0 0% 100%;
   --sidebar-accent: 220 20% 20%;
   --sidebar-accent-foreground: 40 15% 95%;
-  --sidebar-ring: 160 70% 38%;
+  --sidebar-ring: 190 60% 38%;
   --popover: 40 15% 98%;
   --popover-foreground: 220 30% 12%;
   --popover-border: 220 10% 88%;
-  --primary: 160 70% 32%;
+  --primary: 190 60% 28%;
   --primary-foreground: 0 0% 100%;
   --secondary: 220 12% 92%;
   --secondary-foreground: 220 30% 12%;
   --muted: 220 10% 93%;
   --muted-foreground: 220 10% 42%;
-  --accent: 36 60% 95%;
-  --accent-foreground: 220 30% 12%;
+  --accent: 42 75% 92%;
+  --accent-foreground: 190 60% 18%;
   --destructive: 0 72% 50%;
   --destructive-foreground: 0 0% 98%;
   --input: 220 10% 78%;
-  --ring: 160 70% 32%;
-  --chart-1: 160 70% 32%;
+  --ring: 190 60% 28%;
+  --chart-1: 190 60% 28%;
   --chart-2: 220 60% 50%;
-  --chart-3: 36 80% 50%;
+  --chart-3: 42 75% 52%;
   --chart-4: 280 50% 50%;
   --chart-5: 0 65% 50%;
   --font-sans: 'Plus Jakarta Sans', 'Inter', sans-serif;
@@ -89,15 +89,15 @@
   --sidebar: 220 25% 7%;
   --sidebar-foreground: 40 10% 92%;
   --sidebar-border: 220 15% 12%;
-  --sidebar-primary: 160 60% 45%;
+  --sidebar-primary: 190 55% 50%;
   --sidebar-primary-foreground: 0 0% 100%;
   --sidebar-accent: 220 15% 14%;
   --sidebar-accent-foreground: 40 10% 92%;
-  --sidebar-ring: 160 60% 45%;
+  --sidebar-ring: 190 55% 50%;
   --popover: 220 18% 12%;
   --popover-foreground: 40 10% 92%;
   --popover-border: 220 10% 18%;
-  --primary: 160 60% 45%;
+  --primary: 190 55% 50%;
   --primary-foreground: 0 0% 100%;
   --secondary: 220 12% 18%;
   --secondary-foreground: 40 10% 92%;
@@ -108,10 +108,10 @@
   --destructive: 0 72% 50%;
   --destructive-foreground: 0 0% 98%;
   --input: 220 10% 25%;
-  --ring: 160 60% 45%;
-  --chart-1: 160 60% 50%;
+  --ring: 190 55% 50%;
+  --chart-1: 190 55% 50%;
   --chart-2: 220 60% 60%;
-  --chart-3: 36 70% 55%;
+  --chart-3: 42 75% 58%;
   --chart-4: 280 50% 60%;
   --chart-5: 0 65% 55%;
   --shadow-2xs: 0px 1px 2px 0px hsl(0 0% 0% / 0.10);

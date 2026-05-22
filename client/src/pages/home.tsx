@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { Stats, ExamBody, Subject } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
+import { Logo } from "@/components/Logo";
 
 const subjectIcons: Record<string, any> = {
   calculator: Calculator,
@@ -36,8 +37,9 @@ export default function Home() {
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/30" />
         <div className="relative max-w-5xl mx-auto px-4 py-12 sm:py-16">
           <div className="flex flex-col items-center text-center gap-4">
+            <Logo size={72} />
             <Badge variant="secondary" className="text-xs font-medium px-3 py-1" data-testid="badge-brand">
-              Harmony Digital Consults
+              Harmony Digital Consults Ltd
             </Badge>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground leading-tight max-w-2xl" data-testid="text-hero-title">
               Master WAEC, NECO &amp; JAMB
