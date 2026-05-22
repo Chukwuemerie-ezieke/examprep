@@ -1,14 +1,10 @@
+// Harmony Digital Consults Ltd — copyright footer.
+// (Filename kept for backward-compatible imports; no third-party attribution.)
 export function PerplexityAttribution() {
+  const year = new Date().getFullYear();
   return (
-    <footer className="w-full py-4 text-center text-xs text-muted-foreground">
-      <a
-        href="https://www.perplexity.ai/computer"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="hover:text-foreground transition-colors"
-      >
-        Created with Perplexity Computer
-      </a>
-    </footer>
+    <p className="text-[10px] text-muted-foreground">
+      &copy; {year} Harmony Digital Consults Ltd. All rights reserved.
+    </p>
   );
 }
