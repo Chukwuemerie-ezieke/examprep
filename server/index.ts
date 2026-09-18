@@ -1,9 +1,15 @@
 import express, { type Request, Response, NextFunction } from "express";
 import helmet from "helmet";
+import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
+import { randomBytes } from "crypto";
+import passport from "passport";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDatabase } from "./seed";
+import { pool } from "./storage";
+import { configurePassport } from "./auth";
 
 const app = express();
 const httpServer = createServer(app);
@@ -35,6 +41,63 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
+
+// ---- Sessions + authentication ----
+// Persist sessions in Postgres via connect-pg-simple, backed by the shared pg
+// pool. SESSION_SECRET is required in production; in non-production we fall back
+// to a generated ephemeral secret (sessions won't survive a restart) with a
+// clear warning, mirroring the Phase 1 fail-safe style.
+const isProduction = process.env.NODE_ENV === "production";
+let sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret) {
+  if (isProduction) {
+    throw new Error(
+      "SESSION_SECRET is required in production. Set a long random value.",
+    );
+  }
+  // NOTE (dev only): this ephemeral secret is regenerated on every boot, so
+  // every existing session cookie becomes invalid on restart and developers are
+  // logged out on each `npm run dev` restart. This is expected, not a bug. To
+  // keep local sessions stable across restarts, set a fixed SESSION_SECRET in
+  // your .env (see .env.example). Production never reaches this branch because
+  // the block above throws when SESSION_SECRET is unset.
+  sessionSecret = randomBytes(32).toString("hex");
+  console.warn(
+    "[security] SESSION_SECRET is not set; using an ephemeral secret. Sessions will NOT survive a restart (you will be logged out on each restart). Set SESSION_SECRET in .env for stable local sessions.",
+  );
+}
+
+const PgSession = connectPgSimple(session);
+const sessionStore = new PgSession({
+  pool,
+  tableName: "session",
+  createTableIfMissing: true,
+});
+
+// Trust the first proxy hop so secure cookies work behind a TLS-terminating
+// proxy in production.
+if (isProduction) {
+  app.set("trust proxy", 1);
+}
+
+app.use(
+  session({
+    store: sessionStore,
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: isProduction,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    },
+  }),
+);
+
+configurePassport();
+app.use(passport.initialize());
+app.use(passport.session());
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

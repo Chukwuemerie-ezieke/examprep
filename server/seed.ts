@@ -1,8 +1,34 @@
-import { db } from "./storage";
+import { db, storage } from "./storage";
 import { examBodies, subjects, topics, questions, studyTips } from "@shared/schema";
+import { hashPassword } from "./auth";
+
+// Seed the first admin account from ADMIN_EMAIL + ADMIN_PASSWORD env vars.
+// Idempotent: if a user with that email already exists it is left untouched.
+// Runs independently of the catalog seed so it works on already-seeded DBs.
+export async function seedAdminUser() {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email || !password) {
+    console.warn(
+      "[seed] ADMIN_EMAIL/ADMIN_PASSWORD not set; skipping first-admin seeding.",
+    );
+    return;
+  }
+  const existing = await storage.getUserByEmail(email);
+  if (existing) {
+    console.log(`[seed] Admin user ${email} already exists; skipping.`);
+    return;
+  }
+  const passwordHash = await hashPassword(password);
+  await storage.createUser({ email, passwordHash, isAdmin: true });
+  console.log(`[seed] Created first admin user ${email}.`);
+}
 
 export async function seedDatabase() {
-  // Check if already seeded
+  // Always attempt admin seeding (idempotent) regardless of catalog state.
+  await seedAdminUser();
+
+  // Check if catalog already seeded
   const existingBodies = await db.select().from(examBodies);
   if (existingBodies.length > 0) return;
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,83 +13,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/hooks/use-auth";
 import { Logo } from "@/components/Logo";
-import type { ExamBody, Subject, Topic, Question, StudyTip } from "@/lib/types";
-import { ArrowLeft, Lock, Plus, Trash2, Pencil, Upload, X, Save } from "lucide-react";
-
-const PASS_KEY = "examprep_admin_pass";
-
-function authHeaders(pass: string) {
-  return { "x-admin-password": pass };
-}
-
-// ============ LOGIN ============
-function Login({ onLogin }: { onLogin: (pass: string) => void }) {
-  const [pass, setPass] = useState("");
-  const [loading, setLoading] = useState(false);
-  const { toast } = useToast();
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pass }),
-      });
-      if (res.ok) {
-        localStorage.setItem(PASS_KEY, pass);
-        onLogin(pass);
-        toast({ title: "Welcome back, admin" });
-      } else {
-        toast({ title: "Wrong password", variant: "destructive" });
-      }
-    } catch (err: any) {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center space-y-3">
-          <div className="flex justify-center">
-            <Logo size={56} />
-          </div>
-          <CardTitle className="text-base flex items-center justify-center gap-2">
-            <Lock className="w-4 h-4" /> Admin Login
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-3">
-            <div>
-              <Label htmlFor="pwd" className="text-xs">Password</Label>
-              <Input
-                id="pwd"
-                type="password"
-                value={pass}
-                onChange={(e) => setPass(e.target.value)}
-                autoFocus
-                data-testid="input-admin-password"
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading || !pass}>
-              {loading ? "Verifying..." : "Sign in"}
-            </Button>
-            <Link href="/">
-              <Button type="button" variant="ghost" className="w-full text-xs">
-                <ArrowLeft className="w-3 h-3 mr-1" /> Back to site
-              </Button>
-            </Link>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
+import type { ExamBody, Subject, Question, StudyTip } from "@/lib/types";
+import { ArrowLeft, Plus, Trash2, Pencil, Upload, X, Save } from "lucide-react";
 
 // ============ QUESTION FORM ============
 const EMPTY_Q = {
@@ -101,9 +28,8 @@ const EMPTY_Q = {
 };
 
 function QuestionForm({
-  pass, initial, onClose, examBodies, subjects,
+  initial, onClose, examBodies, subjects,
 }: {
-  pass: string;
   initial?: Question;
   onClose: () => void;
   examBodies: ExamBody[];
@@ -127,7 +53,7 @@ function QuestionForm({
         ? `/api/admin/questions/${initial.id}`
         : `/api/admin/questions`;
       const method = initial ? "PATCH" : "POST";
-      await apiRequest(method, url, payload, authHeaders(pass));
+      await apiRequest(method, url, payload);
       toast({ title: initial ? "Updated" : "Question created" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/questions-list"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
@@ -238,7 +164,7 @@ function QuestionForm({
 }
 
 // ============ QUESTIONS TAB ============
-function QuestionsTab({ pass, examBodies, subjects }: { pass: string; examBodies: ExamBody[]; subjects: Subject[] }) {
+function QuestionsTab({ examBodies, subjects }: { examBodies: ExamBody[]; subjects: Subject[] }) {
   const [editing, setEditing] = useState<Question | "new" | null>(null);
   const [filterExam, setFilterExam] = useState<string>("all");
   const [filterSubject, setFilterSubject] = useState<string>("all");
@@ -251,7 +177,7 @@ function QuestionsTab({ pass, examBodies, subjects }: { pass: string; examBodies
       if (filterExam !== "all") params.set("examBodyId", filterExam);
       if (filterSubject !== "all") params.set("subjectId", filterSubject);
       params.set("limit", "100");
-      const res = await fetch(`/api/questions?${params.toString()}`);
+      const res = await fetch(`/api/questions?${params.toString()}`, { credentials: "include" });
       return res.json();
     },
   });
@@ -259,7 +185,7 @@ function QuestionsTab({ pass, examBodies, subjects }: { pass: string; examBodies
   async function del(id: number) {
     if (!confirm(`Delete question #${id}? This cannot be undone.`)) return;
     try {
-      await apiRequest("DELETE", `/api/admin/questions/${id}`, undefined, authHeaders(pass));
+      await apiRequest("DELETE", `/api/admin/questions/${id}`);
       toast({ title: "Deleted" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/questions-list"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
@@ -271,7 +197,6 @@ function QuestionsTab({ pass, examBodies, subjects }: { pass: string; examBodies
   if (editing) {
     return (
       <QuestionForm
-        pass={pass}
         initial={editing === "new" ? undefined : editing}
         onClose={() => setEditing(null)}
         examBodies={examBodies}
@@ -350,7 +275,7 @@ function QuestionsTab({ pass, examBodies, subjects }: { pass: string; examBodies
 }
 
 // ============ STUDY TIPS TAB ============
-function TipsTab({ pass, subjects }: { pass: string; subjects: Subject[] }) {
+function TipsTab({ subjects }: { subjects: Subject[] }) {
   const { toast } = useToast();
   const [form, setForm] = useState({ subjectId: 1, topicId: null as number | null, title: "", content: "" });
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -358,7 +283,7 @@ function TipsTab({ pass, subjects }: { pass: string; subjects: Subject[] }) {
   const { data: tips, isLoading } = useQuery<StudyTip[]>({
     queryKey: ["/api/admin/study-tips"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/study-tips", { headers: authHeaders(pass) });
+      const res = await fetch("/api/admin/study-tips", { credentials: "include" });
       return res.json();
     },
   });
@@ -373,10 +298,10 @@ function TipsTab({ pass, subjects }: { pass: string; subjects: Subject[] }) {
       const payload = { ...form };
       if (!payload.topicId) payload.topicId = null;
       if (editingId) {
-        await apiRequest("PATCH", `/api/admin/study-tips/${editingId}`, payload, authHeaders(pass));
+        await apiRequest("PATCH", `/api/admin/study-tips/${editingId}`, payload);
         toast({ title: "Tip updated" });
       } else {
-        await apiRequest("POST", `/api/admin/study-tips`, payload, authHeaders(pass));
+        await apiRequest("POST", `/api/admin/study-tips`, payload);
         toast({ title: "Tip created" });
       }
       reset();
@@ -389,7 +314,7 @@ function TipsTab({ pass, subjects }: { pass: string; subjects: Subject[] }) {
   async function del(id: number) {
     if (!confirm("Delete this study tip?")) return;
     try {
-      await apiRequest("DELETE", `/api/admin/study-tips/${id}`, undefined, authHeaders(pass));
+      await apiRequest("DELETE", `/api/admin/study-tips/${id}`);
       toast({ title: "Deleted" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/study-tips"] });
     } catch (err: any) {
@@ -477,14 +402,14 @@ function TipsTab({ pass, subjects }: { pass: string; subjects: Subject[] }) {
 }
 
 // ============ SUBJECTS TAB ============
-function SubjectsTab({ pass, subjects }: { pass: string; subjects: Subject[] }) {
+function SubjectsTab({ subjects }: { subjects: Subject[] }) {
   const { toast } = useToast();
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("book-open");
 
   async function add() {
     try {
-      await apiRequest("POST", `/api/admin/subjects`, { name, icon }, authHeaders(pass));
+      await apiRequest("POST", `/api/admin/subjects`, { name, icon });
       toast({ title: "Subject added" });
       setName("");
       queryClient.invalidateQueries({ queryKey: ["/api/subjects"] });
@@ -538,7 +463,7 @@ function SubjectsTab({ pass, subjects }: { pass: string; subjects: Subject[] }) 
 }
 
 // ============ BULK IMPORT TAB ============
-function BulkTab({ pass }: { pass: string }) {
+function BulkTab() {
   const { toast } = useToast();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -566,7 +491,7 @@ function BulkTab({ pass }: { pass: string }) {
     try {
       const items = JSON.parse(text);
       if (!Array.isArray(items)) throw new Error("JSON must be an array");
-      const res = await apiRequest("POST", "/api/admin/questions/bulk", items, authHeaders(pass));
+      const res = await apiRequest("POST", "/api/admin/questions/bulk", items);
       const json = await res.json();
       setResult(json);
       toast({ title: `Imported ${json.created} of ${json.total}` });
@@ -618,37 +543,24 @@ function BulkTab({ pass }: { pass: string }) {
 }
 
 // ============ MAIN ADMIN PAGE ============
+// Access control (auth + isAdmin) is enforced by the ProtectedRoute wrapper in
+// App.tsx, so this component can assume the current user is an admin. Admin API
+// calls authorize via the express-session cookie (credentials:'include'); there
+// is no longer any x-admin-password header or PASS_KEY localStorage flow.
 export default function Admin() {
-  const [pass, setPass] = useState<string | null>(() => localStorage.getItem(PASS_KEY));
-  const [verified, setVerified] = useState(false);
+  const { user, logoutMutation } = useAuth();
+  const { toast } = useToast();
 
-  // Re-verify saved password on load
-  useEffect(() => {
-    if (!pass) return;
-    fetch("/api/admin/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pass }),
-    }).then((r) => {
-      if (r.ok) setVerified(true);
-      else {
-        localStorage.removeItem(PASS_KEY);
-        setPass(null);
-      }
-    });
-  }, [pass]);
+  const { data: examBodies } = useQuery<ExamBody[]>({ queryKey: ["/api/exam-bodies"] });
+  const { data: subjects } = useQuery<Subject[]>({ queryKey: ["/api/subjects"] });
 
-  const { data: examBodies } = useQuery<ExamBody[]>({ queryKey: ["/api/exam-bodies"], enabled: verified });
-  const { data: subjects } = useQuery<Subject[]>({ queryKey: ["/api/subjects"], enabled: verified });
-
-  if (!pass || !verified) {
-    return <Login onLogin={(p) => { setPass(p); setVerified(true); }} />;
-  }
-
-  function logout() {
-    localStorage.removeItem(PASS_KEY);
-    setPass(null);
-    setVerified(false);
+  async function logout() {
+    try {
+      await logoutMutation.mutateAsync();
+      toast({ title: "Signed out" });
+    } catch (err: any) {
+      toast({ title: "Logout failed", description: err.message, variant: "destructive" });
+    }
   }
 
   return (
@@ -659,7 +571,9 @@ export default function Admin() {
             <Logo size={36} />
             <div>
               <h1 className="text-sm font-bold">Admin Panel</h1>
-              <p className="text-[10px] text-muted-foreground">Harmony Digital Consults</p>
+              <p className="text-[10px] text-muted-foreground">
+                {user?.displayName || user?.email || "Harmony Digital Consults"}
+              </p>
             </div>
           </div>
           <div className="flex gap-2">
@@ -668,7 +582,9 @@ export default function Admin() {
                 <ArrowLeft className="w-3 h-3" /> Site
               </Button>
             </Link>
-            <Button variant="outline" size="sm" onClick={logout}>Logout</Button>
+            <Button variant="outline" size="sm" onClick={logout} disabled={logoutMutation.isPending}>
+              {logoutMutation.isPending ? "..." : "Logout"}
+            </Button>
           </div>
         </div>
       </header>
@@ -683,17 +599,17 @@ export default function Admin() {
           </TabsList>
           <TabsContent value="questions">
             {examBodies && subjects && (
-              <QuestionsTab pass={pass} examBodies={examBodies} subjects={subjects} />
+              <QuestionsTab examBodies={examBodies} subjects={subjects} />
             )}
           </TabsContent>
           <TabsContent value="tips">
-            {subjects && <TipsTab pass={pass} subjects={subjects} />}
+            {subjects && <TipsTab subjects={subjects} />}
           </TabsContent>
           <TabsContent value="subjects">
-            {subjects && <SubjectsTab pass={pass} subjects={subjects} />}
+            {subjects && <SubjectsTab subjects={subjects} />}
           </TabsContent>
           <TabsContent value="bulk">
-            <BulkTab pass={pass} />
+            <BulkTab />
           </TabsContent>
         </Tabs>
       </main>
