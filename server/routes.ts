@@ -4,15 +4,19 @@ import rateLimit from "express-rate-limit";
 import { fromError } from "zod-validation-error";
 import { z } from "zod";
 import type { ZodError, ZodTypeAny } from "zod";
+import passport from "passport";
 import { storage } from "./storage";
-import type { Question } from "@shared/schema";
+import type { Question, User } from "@shared/schema";
 import {
   insertQuizSessionSchema,
   insertQuestionSchema,
   insertStudyTipSchema,
   insertSubjectSchema,
   insertTopicSchema,
+  signupSchema,
+  loginSchema,
 } from "@shared/schema";
+import { hashPassword } from "./auth";
 
 // Strip answer-revealing fields (correctAnswer, explanation, textbookRef) from a
 // question so it is safe to send to the client during an active CBT quiz.
@@ -43,27 +47,29 @@ const gradeSubmissionSchema = z.object({
   timeSpentSeconds: z.number().int().nonnegative().optional(),
 });
 
-// Admin password (set via env only; no default). When unset/empty, admin
-// access fails safe: all admin routes reject with 401.
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const ADMIN_ENABLED = typeof ADMIN_PASSWORD === "string" && ADMIN_PASSWORD.length > 0;
-
-if (!ADMIN_ENABLED) {
-  console.warn(
-    "[security] ADMIN_PASSWORD is not configured; admin routes are DISABLED (all admin requests return 401). Set ADMIN_PASSWORD to enable them.",
-  );
+// Require an authenticated session. Fails safe: 401 when not logged in.
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.isAuthenticated && req.isAuthenticated()) {
+    return next();
+  }
+  return res.status(401).json({ message: "Unauthorized" });
 }
 
+// Role-based admin authorization. Admin access is now derived from the
+// authenticated user's `isAdmin` flag (Phase 2 replaces the legacy
+// x-admin-password header check). Fails safe: unauthenticated or non-admin
+// users are rejected with 401.
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  // Fail safe: if no admin secret is configured, deny all admin access.
-  if (!ADMIN_ENABLED) {
-    return res.status(401).json({ message: "Unauthorized" });
+  if (req.isAuthenticated && req.isAuthenticated() && (req.user as User)?.isAdmin) {
+    return next();
   }
-  const pass = req.header("x-admin-password") || req.query.admin_password;
-  if (pass !== ADMIN_PASSWORD) {
-    return res.status(401).json({ message: "Unauthorized" });
-  }
-  next();
+  return res.status(401).json({ message: "Unauthorized" });
+}
+
+// Remove the password hash before returning a user object to a client.
+function safeUser(user: User) {
+  const { passwordHash, ...rest } = user;
+  return rest;
 }
 
 // Rate limiter for admin/auth-sensitive routes. 15 minute window.
@@ -110,6 +116,73 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // ============ AUTH ROUTES ============
+
+  // Sign up: validate, reject duplicate email (409), hash the password, create
+  // the user, log them in, and return the safe user (no passwordHash).
+  app.post("/api/auth/signup", verifyLimiter, async (req, res, next) => {
+    const data = validateBody(signupSchema, req, res);
+    if (!data) return;
+    const email = data.email.toLowerCase();
+    const existing = await storage.getUserByEmail(email);
+    if (existing) {
+      return res.status(409).json({ message: "Email already registered" });
+    }
+    const passwordHash = await hashPassword(data.password);
+    const user = await storage.createUser({
+      email,
+      passwordHash,
+      displayName: data.displayName ?? null,
+    });
+    req.login(user, (err) => {
+      if (err) return next(err);
+      res.status(201).json(safeUser(user));
+    });
+  });
+
+  // Log in with passport-local. Returns the safe user on success, 401 on
+  // failure.
+  app.post("/api/auth/login", verifyLimiter, (req, res, next) => {
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: formatZodError(parsed.error),
+      });
+    }
+    // Normalize email casing to match how signup stores it.
+    req.body.email = String(parsed.data.email).toLowerCase();
+    passport.authenticate("local", (err: unknown, user: User | false) => {
+      if (err) return next(err);
+      if (!user) return res.status(401).json({ message: "Invalid credentials" });
+      req.login(user, (loginErr) => {
+        if (loginErr) return next(loginErr);
+        res.json(safeUser(user));
+      });
+    })(req, res, next);
+  });
+
+  // Log out: clear the passport login and destroy the session.
+  app.post("/api/auth/logout", (req, res, next) => {
+    req.logout((err) => {
+      if (err) return next(err);
+      req.session.destroy(() => {
+        res.clearCookie("connect.sid");
+        res.json({ ok: true });
+      });
+    });
+  });
+
+  // Current authenticated user (safe shape) or 401 when not logged in.
+  app.get("/api/auth/me", (req, res) => {
+    if (req.isAuthenticated && req.isAuthenticated() && req.user) {
+      return res.json(safeUser(req.user as User));
+    }
+    return res.status(401).json({ message: "Unauthorized" });
+  });
+
+  // ============ END AUTH ROUTES ============
 
   // Exam bodies
   app.get("/api/exam-bodies", async (_req, res) => {
@@ -189,27 +262,31 @@ export async function registerRoutes(
     res.json(tips);
   });
 
-  // Quiz sessions
-  app.get("/api/quiz-sessions", async (_req, res) => {
-    const sessions = await storage.getQuizSessions();
+  // Quiz sessions. All scoped to the authenticated user.
+  app.get("/api/quiz-sessions", requireAuth, async (req, res) => {
+    const sessions = await storage.getQuizSessions((req.user as User).id);
     res.json(sessions);
   });
 
-  app.get("/api/quiz-sessions/:id", async (req, res) => {
+  app.get("/api/quiz-sessions/:id", requireAuth, async (req, res) => {
     const id = parseInt(String(req.params.id));
     const session = await storage.getQuizSession(id);
     if (!session) return res.status(404).json({ message: "Session not found" });
+    if (session.userId !== (req.user as User).id) {
+      return res.status(404).json({ message: "Session not found" });
+    }
     res.json(session);
   });
 
-  app.post("/api/quiz-sessions", async (req, res) => {
+  app.post("/api/quiz-sessions", requireAuth, async (req, res) => {
     const data = validateBody(insertQuizSessionSchema, req, res);
     if (!data) return;
-    const session = await storage.createQuizSession(data);
+    // userId is always taken from the session, never from the request body.
+    const session = await storage.createQuizSession({ ...data, userId: (req.user as User).id });
     res.json(session);
   });
 
-  app.patch("/api/quiz-sessions/:id", async (req, res) => {
+  app.patch("/api/quiz-sessions/:id", requireAuth, async (req, res) => {
     const id = parseInt(String(req.params.id));
     const result = insertQuizSessionSchema.partial().safeParse(req.body);
     if (!result.success) {
@@ -217,6 +294,10 @@ export async function registerRoutes(
         message: "Validation failed",
         errors: formatZodError(result.error),
       });
+    }
+    const existing = await storage.getQuizSession(id);
+    if (!existing || existing.userId !== (req.user as User).id) {
+      return res.status(404).json({ message: "Session not found" });
     }
     const session = await storage.updateQuizSession(id, result.data);
     if (!session) return res.status(404).json({ message: "Session not found" });
@@ -226,13 +307,16 @@ export async function registerRoutes(
   // Server-side CBT grading. Accepts the submitted answers, computes the score
   // against the stored correct answers, persists the session, and returns the
   // review payload. Correct answers/explanations are revealed ONLY here.
-  app.post("/api/quiz-sessions/:id/submit", async (req, res) => {
+  app.post("/api/quiz-sessions/:id/submit", requireAuth, async (req, res) => {
     const id = parseInt(String(req.params.id));
     if (Number.isNaN(id)) {
       return res.status(404).json({ message: "Session not found" });
     }
     const session = await storage.getQuizSession(id);
     if (!session) return res.status(404).json({ message: "Session not found" });
+    if (session.userId !== (req.user as User).id) {
+      return res.status(404).json({ message: "Session not found" });
+    }
 
     const data = validateBody(gradeSubmissionSchema, req, res);
     if (!data) return;
@@ -327,17 +411,14 @@ export async function registerRoutes(
   // Apply a rate limiter to all admin routes to guard against abuse.
   app.use("/api/admin", adminLimiter);
 
-  // Verify admin password
+  // Verify admin access. Phase 2 replaces the legacy x-admin-password check with
+  // role-based authorization: admin status is derived from the authenticated
+  // user's session role. Returns { ok:true } only for a logged-in admin.
   app.post("/api/admin/verify", verifyLimiter, (req, res) => {
-    // Fail safe: if no admin secret is configured, deny all verification.
-    if (!ADMIN_ENABLED) {
-      return res.status(401).json({ ok: false });
+    if (req.isAuthenticated && req.isAuthenticated() && (req.user as User)?.isAdmin) {
+      return res.json({ ok: true });
     }
-    const { password } = req.body ?? {};
-    if (password !== ADMIN_PASSWORD) {
-      return res.status(401).json({ ok: false });
-    }
-    res.json({ ok: true });
+    return res.status(401).json({ ok: false });
   });
 
   // Admin: list all study tips (without subjectId filter)
@@ -485,12 +566,30 @@ export async function registerRoutes(
 
   // ============ END ADMIN ROUTES ============
 
-  // Stats endpoint
-  app.get("/api/stats", async (_req, res) => {
+  // Stats endpoint. App-wide catalog counts (totalQuestions/totalExamBodies/
+  // totalSubjects) are always global. Personal stats (totalSessions/
+  // completedSessions/averageScore) are computed ONLY from the authenticated
+  // user's sessions; unauthenticated callers get zeroed personal stats so the
+  // home page can render without requiring login.
+  //
+  // Response shape (for FEAT-002 to match):
+  //   {
+  //     totalQuestions: number,      // global catalog
+  //     totalExamBodies: number,     // global catalog
+  //     totalSubjects: number,       // global catalog
+  //     totalSessions: number,       // per-user (0 if unauthenticated)
+  //     completedSessions: number,   // per-user (0 if unauthenticated)
+  //     averageScore: number,        // per-user percentage (0 if none/unauthenticated)
+  //   }
+  app.get("/api/stats", async (req, res) => {
     const totalQuestions = await storage.getQuestionCount({});
     const examBodiesList = await storage.getExamBodies();
     const subjectsList = await storage.getSubjects();
-    const sessions = await storage.getQuizSessions();
+
+    const isAuthed = !!(req.isAuthenticated && req.isAuthenticated() && req.user);
+    const sessions = isAuthed
+      ? await storage.getQuizSessions((req.user as User).id)
+      : [];
     const completedSessions = sessions.filter(s => s.status === "completed");
     const avgScore = completedSessions.length > 0
       ? Math.round(completedSessions.reduce((sum, s) => sum + (s.correctAnswers / s.totalQuestions) * 100, 0) / completedSessions.length)

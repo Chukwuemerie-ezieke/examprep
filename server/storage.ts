@@ -5,6 +5,7 @@ import {
   type Question, type InsertQuestion, questions,
   type StudyTip, type InsertStudyTip, studyTips,
   type QuizSession, type InsertQuizSession, quizSessions,
+  type User, users,
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -14,7 +15,7 @@ if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is required");
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 export const db = drizzle(pool);
 
@@ -68,10 +69,15 @@ export interface IStorage {
   // Subject mutations
   updateSubject(id: number, updates: Partial<InsertSubject>): Promise<Subject | undefined>;
 
+  // Users
+  getUserByEmail(email: string): Promise<User | undefined>;
+  getUserById(id: number): Promise<User | undefined>;
+  createUser(data: { email: string; passwordHash: string; displayName?: string | null; isAdmin?: boolean }): Promise<User>;
+
   // Quiz sessions
-  getQuizSessions(): Promise<QuizSession[]>;
+  getQuizSessions(userId?: number): Promise<QuizSession[]>;
   getQuizSession(id: number): Promise<QuizSession | undefined>;
-  createQuizSession(session: InsertQuizSession): Promise<QuizSession>;
+  createQuizSession(session: InsertQuizSession & { userId?: number | null }): Promise<QuizSession>;
   updateQuizSession(id: number, updates: Partial<QuizSession>): Promise<QuizSession | undefined>;
 }
 
@@ -233,7 +239,35 @@ export class DatabaseStorage implements IStorage {
     return rows[0];
   }
 
-  async getQuizSessions(): Promise<QuizSession[]> {
+  // ---- Users ----
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const rows = await db.select().from(users).where(eq(users.email, email));
+    return rows[0];
+  }
+
+  async getUserById(id: number): Promise<User | undefined> {
+    const rows = await db.select().from(users).where(eq(users.id, id));
+    return rows[0];
+  }
+
+  async createUser(data: { email: string; passwordHash: string; displayName?: string | null; isAdmin?: boolean }): Promise<User> {
+    const rows = await db
+      .insert(users)
+      .values({
+        email: data.email,
+        passwordHash: data.passwordHash,
+        displayName: data.displayName ?? null,
+        isAdmin: data.isAdmin ?? false,
+        createdAt: new Date().toISOString(),
+      })
+      .returning();
+    return rows[0];
+  }
+
+  async getQuizSessions(userId?: number): Promise<QuizSession[]> {
+    if (userId !== undefined) {
+      return db.select().from(quizSessions).where(eq(quizSessions.userId, userId));
+    }
     return db.select().from(quizSessions);
   }
 
@@ -242,7 +276,7 @@ export class DatabaseStorage implements IStorage {
     return rows[0];
   }
 
-  async createQuizSession(session: InsertQuizSession): Promise<QuizSession> {
+  async createQuizSession(session: InsertQuizSession & { userId?: number | null }): Promise<QuizSession> {
     const rows = await db.insert(quizSessions).values(session).returning();
     return rows[0];
   }
