@@ -1,16 +1,78 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import rateLimit from "express-rate-limit";
+import { fromError } from "zod-validation-error";
+import type { ZodError, ZodTypeAny } from "zod";
 import { storage } from "./storage";
+import {
+  insertQuizSessionSchema,
+  insertQuestionSchema,
+  insertStudyTipSchema,
+  insertSubjectSchema,
+  insertTopicSchema,
+} from "@shared/schema";
 
-// Admin password (set via env, falls back to default for dev)
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "emy#olu@9988";
+// Admin password (set via env only; no default). When unset/empty, admin
+// access fails safe: all admin routes reject with 401.
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_ENABLED = typeof ADMIN_PASSWORD === "string" && ADMIN_PASSWORD.length > 0;
+
+if (!ADMIN_ENABLED) {
+  console.warn(
+    "[security] ADMIN_PASSWORD is not configured; admin routes are DISABLED (all admin requests return 401). Set ADMIN_PASSWORD to enable them.",
+  );
+}
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  // Fail safe: if no admin secret is configured, deny all admin access.
+  if (!ADMIN_ENABLED) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
   const pass = req.header("x-admin-password") || req.query.admin_password;
   if (pass !== ADMIN_PASSWORD) {
     return res.status(401).json({ message: "Unauthorized" });
   }
   next();
+}
+
+// Rate limiter for admin/auth-sensitive routes. 15 minute window.
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests, please try again later." },
+});
+
+// Stricter limiter for the password verification endpoint to slow brute force.
+const verifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "Too many attempts, please try again later." },
+});
+
+function formatZodError(error: ZodError) {
+  return fromError(error).toString();
+}
+
+// Validate a request body against a Zod schema; on failure send a 400 and
+// return undefined so the caller can bail out.
+function validateBody<T extends ZodTypeAny>(
+  schema: T,
+  req: Request,
+  res: Response,
+): ReturnType<T["parse"]> | undefined {
+  const result = schema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({
+      message: "Validation failed",
+      errors: formatZodError(result.error),
+    });
+    return undefined;
+  }
+  return result.data as ReturnType<T["parse"]>;
 }
 
 export async function registerRoutes(
@@ -32,7 +94,7 @@ export async function registerRoutes(
 
   // Topics for a subject
   app.get("/api/subjects/:subjectId/topics", async (req, res) => {
-    const subjectId = parseInt(req.params.subjectId);
+    const subjectId = parseInt(String(req.params.subjectId));
     const topicsList = await storage.getTopics(subjectId);
     res.json(topicsList);
   });
@@ -55,7 +117,7 @@ export async function registerRoutes(
 
   // Single question
   app.get("/api/questions/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const q = await storage.getQuestion(id);
     if (!q) return res.status(404).json({ message: "Question not found" });
     res.json(q);
@@ -85,29 +147,45 @@ export async function registerRoutes(
   });
 
   app.get("/api/quiz-sessions/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const session = await storage.getQuizSession(id);
     if (!session) return res.status(404).json({ message: "Session not found" });
     res.json(session);
   });
 
   app.post("/api/quiz-sessions", async (req, res) => {
-    const session = await storage.createQuizSession(req.body);
+    const data = validateBody(insertQuizSessionSchema, req, res);
+    if (!data) return;
+    const session = await storage.createQuizSession(data);
     res.json(session);
   });
 
   app.patch("/api/quiz-sessions/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    const session = await storage.updateQuizSession(id, req.body);
+    const id = parseInt(String(req.params.id));
+    const result = insertQuizSessionSchema.partial().safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: formatZodError(result.error),
+      });
+    }
+    const session = await storage.updateQuizSession(id, result.data);
     if (!session) return res.status(404).json({ message: "Session not found" });
     res.json(session);
   });
 
   // ============ ADMIN ROUTES (password protected) ============
 
+  // Apply a rate limiter to all admin routes to guard against abuse.
+  app.use("/api/admin", adminLimiter);
+
   // Verify admin password
-  app.post("/api/admin/verify", (req, res) => {
-    const { password } = req.body;
+  app.post("/api/admin/verify", verifyLimiter, (req, res) => {
+    // Fail safe: if no admin secret is configured, deny all verification.
+    if (!ADMIN_ENABLED) {
+      return res.status(401).json({ ok: false });
+    }
+    const { password } = req.body ?? {};
     if (password !== ADMIN_PASSWORD) {
       return res.status(401).json({ ok: false });
     }
@@ -133,21 +211,30 @@ export async function registerRoutes(
 
   // Question CRUD
   app.post("/api/admin/questions", requireAdmin, async (req, res) => {
+    const data = validateBody(insertQuestionSchema, req, res);
+    if (!data) return;
     try {
-      const q = await storage.createQuestion(req.body);
+      const q = await storage.createQuestion(data);
       res.json(q);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
   });
   app.patch("/api/admin/questions/:id", requireAdmin, async (req, res) => {
-    const id = parseInt(req.params.id);
-    const q = await storage.updateQuestion(id, req.body);
+    const id = parseInt(String(req.params.id));
+    const result = insertQuestionSchema.partial().safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: formatZodError(result.error),
+      });
+    }
+    const q = await storage.updateQuestion(id, result.data);
     if (!q) return res.status(404).json({ message: "Not found" });
     res.json(q);
   });
   app.delete("/api/admin/questions/:id", requireAdmin, async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const ok = await storage.deleteQuestion(id);
     if (!ok) return res.status(404).json({ message: "Not found" });
     res.json({ ok: true });
@@ -159,8 +246,13 @@ export async function registerRoutes(
     let created = 0;
     const errors: string[] = [];
     for (let i = 0; i < items.length; i++) {
+      const parsed = insertQuestionSchema.safeParse(items[i]);
+      if (!parsed.success) {
+        errors.push(`Row ${i + 1}: ${formatZodError(parsed.error)}`);
+        continue;
+      }
       try {
-        await storage.createQuestion(items[i]);
+        await storage.createQuestion(parsed.data);
         created++;
       } catch (e: any) {
         errors.push(`Row ${i + 1}: ${e.message}`);
@@ -171,21 +263,30 @@ export async function registerRoutes(
 
   // Study tip CRUD
   app.post("/api/admin/study-tips", requireAdmin, async (req, res) => {
+    const data = validateBody(insertStudyTipSchema, req, res);
+    if (!data) return;
     try {
-      const t = await storage.createStudyTip(req.body);
+      const t = await storage.createStudyTip(data);
       res.json(t);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
   });
   app.patch("/api/admin/study-tips/:id", requireAdmin, async (req, res) => {
-    const id = parseInt(req.params.id);
-    const t = await storage.updateStudyTip(id, req.body);
+    const id = parseInt(String(req.params.id));
+    const result = insertStudyTipSchema.partial().safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: formatZodError(result.error),
+      });
+    }
+    const t = await storage.updateStudyTip(id, result.data);
     if (!t) return res.status(404).json({ message: "Not found" });
     res.json(t);
   });
   app.delete("/api/admin/study-tips/:id", requireAdmin, async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const ok = await storage.deleteStudyTip(id);
     if (!ok) return res.status(404).json({ message: "Not found" });
     res.json({ ok: true });
@@ -193,31 +294,42 @@ export async function registerRoutes(
 
   // Subject create/update
   app.post("/api/admin/subjects", requireAdmin, async (req, res) => {
+    const data = validateBody(insertSubjectSchema, req, res);
+    if (!data) return;
     try {
-      const s = await storage.createSubject(req.body);
+      const s = await storage.createSubject(data);
       res.json(s);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
   });
   app.patch("/api/admin/subjects/:id", requireAdmin, async (req, res) => {
-    const id = parseInt(req.params.id);
-    const s = await storage.updateSubject(id, req.body);
+    const id = parseInt(String(req.params.id));
+    const result = insertSubjectSchema.partial().safeParse(req.body);
+    if (!result.success) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: formatZodError(result.error),
+      });
+    }
+    const s = await storage.updateSubject(id, result.data);
     if (!s) return res.status(404).json({ message: "Not found" });
     res.json(s);
   });
 
   // Topic create/delete
   app.post("/api/admin/topics", requireAdmin, async (req, res) => {
+    const data = validateBody(insertTopicSchema, req, res);
+    if (!data) return;
     try {
-      const t = await storage.createTopic(req.body);
+      const t = await storage.createTopic(data);
       res.json(t);
     } catch (e: any) {
       res.status(400).json({ message: e.message });
     }
   });
   app.delete("/api/admin/topics/:id", requireAdmin, async (req, res) => {
-    const id = parseInt(req.params.id);
+    const id = parseInt(String(req.params.id));
     const ok = await storage.deleteTopic(id);
     if (!ok) return res.status(404).json({ message: "Not found" });
     res.json({ ok: true });
