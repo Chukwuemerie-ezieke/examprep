@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,12 +9,25 @@ import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Clock, Play, CheckCircle2, XCircle, Trophy, RotateCcw, BookOpen } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import type { ExamBody, Subject, CbtQuestion, CbtReviewItem, CbtGradeResponse } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 
 type Phase = "setup" | "quiz" | "results";
 
+// A quiz session belongs to a user, so a 401 means the session expired (e.g.
+// mid-exam). apiRequest throws `Error("<status>: <body>")`; detect the 401 so
+// callers can route the user back to /auth instead of dead-ending silently.
+function isUnauthorized(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err);
+  return /^401:/.test(raw);
+}
+
 export default function CBT() {
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const { user } = useAuth();
   const [phase, setPhase] = useState<Phase>("setup");
   const [examBodyId, setExamBodyId] = useState("");
   const [subjectId, setSubjectId] = useState("");
@@ -70,67 +83,125 @@ export default function CBT() {
   const startQuiz = async () => {
     if (!examBodyId || !subjectId) return;
 
-    const p = new URLSearchParams();
-    p.set("examBodyId", examBodyId);
-    p.set("subjectId", subjectId);
-    if (year) p.set("year", year);
-    p.set("limit", questionCount);
-    const res = await apiRequest("GET", `/api/quiz/questions?${p}`);
-    const data = await res.json();
+    // The CBT flow persists a per-user quiz session, so it requires an account.
+    // The /cbt route is already behind ProtectedRoute, but guard here too in
+    // case the session lapsed between the guard render and the click.
+    if (!user) {
+      toast({
+        title: "Sign in to start an exam",
+        description: "Your exam results are saved to your account.",
+      });
+      navigate("/auth");
+      return;
+    }
 
-    if (!data.questions?.length) return;
+    try {
+      const p = new URLSearchParams();
+      p.set("examBodyId", examBodyId);
+      p.set("subjectId", subjectId);
+      if (year) p.set("year", year);
+      p.set("limit", questionCount);
+      const res = await apiRequest("GET", `/api/quiz/questions?${p}`);
+      const data = await res.json();
 
-    // Shuffle questions
-    const shuffled = [...data.questions].sort(() => Math.random() - 0.5).slice(0, parseInt(questionCount));
-    setQuestions(shuffled);
-    setAnswers({});
-    setCurrentIdx(0);
-    setTimeRemaining(parseInt(timeLimit) * 60);
+      if (!data.questions?.length) {
+        toast({
+          title: "No questions found",
+          description: "Try a different exam body, subject, or year.",
+          variant: "destructive",
+        });
+        return;
+      }
 
-    // Create session
-    const sessionRes = await apiRequest("POST", "/api/quiz-sessions", {
-      examBodyId: parseInt(examBodyId),
-      subjectId: parseInt(subjectId),
-      year: year ? parseInt(year) : null,
-      totalQuestions: shuffled.length,
-      answeredQuestions: 0,
-      correctAnswers: 0,
-      timeLimitMinutes: parseInt(timeLimit),
-      timeSpentSeconds: 0,
-      status: "in_progress",
-      answersJson: "{}",
-      createdAt: new Date().toISOString(),
-    });
-    const session = await sessionRes.json();
-    setSessionId(session.id);
-    setPhase("quiz");
+      // Shuffle questions
+      const shuffled = [...data.questions].sort(() => Math.random() - 0.5).slice(0, parseInt(questionCount));
+
+      // Create session before switching phases so a failure leaves the setup
+      // screen intact instead of dropping the user into an empty quiz.
+      const sessionRes = await apiRequest("POST", "/api/quiz-sessions", {
+        examBodyId: parseInt(examBodyId),
+        subjectId: parseInt(subjectId),
+        year: year ? parseInt(year) : null,
+        totalQuestions: shuffled.length,
+        answeredQuestions: 0,
+        correctAnswers: 0,
+        timeLimitMinutes: parseInt(timeLimit),
+        timeSpentSeconds: 0,
+        status: "in_progress",
+        answersJson: "{}",
+        createdAt: new Date().toISOString(),
+      });
+      const session = await sessionRes.json();
+
+      setQuestions(shuffled);
+      setAnswers({});
+      setCurrentIdx(0);
+      setTimeRemaining(parseInt(timeLimit) * 60);
+      setSessionId(session.id);
+      setPhase("quiz");
+    } catch (err) {
+      if (isUnauthorized(err)) {
+        toast({
+          title: "Session expired",
+          description: "Please sign in again to start your exam.",
+          variant: "destructive",
+        });
+        navigate("/auth");
+        return;
+      }
+      toast({
+        title: "Could not start exam",
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSubmit = useCallback(async () => {
     const totalTime = parseInt(timeLimit) * 60 - timeRemaining;
 
     if (sessionId) {
-      // Grade server-side: the server computes the score against the stored
-      // correct answers and returns the review with answers/explanations.
-      const res = await apiRequest("POST", `/api/quiz-sessions/${sessionId}/submit`, {
-        // Send every served question id (answered or not) so grading and the
-        // review cover the full quiz; skipped questions score as incorrect.
-        questionIds: questions.map((q) => q.id),
-        answers,
-        timeSpentSeconds: totalTime,
-      });
-      const data: CbtGradeResponse = await res.json();
-      setResult({ correct: data.score.correct, total: data.score.total, time: totalTime });
-      setReview(data.review);
-      queryClient.invalidateQueries({ queryKey: ["/api/quiz-sessions"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      try {
+        // Grade server-side: the server computes the score against the stored
+        // correct answers and returns the review with answers/explanations.
+        const res = await apiRequest("POST", `/api/quiz-sessions/${sessionId}/submit`, {
+          // Send every served question id (answered or not) so grading and the
+          // review cover the full quiz; skipped questions score as incorrect.
+          questionIds: questions.map((q) => q.id),
+          answers,
+          timeSpentSeconds: totalTime,
+        });
+        const data: CbtGradeResponse = await res.json();
+        setResult({ correct: data.score.correct, total: data.score.total, time: totalTime });
+        setReview(data.review);
+        queryClient.invalidateQueries({ queryKey: ["/api/quiz-sessions"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      } catch (err) {
+        // A 401 here means the session expired mid-exam. Surface it and route
+        // to /auth rather than silently dropping the submission.
+        if (isUnauthorized(err)) {
+          toast({
+            title: "Session expired",
+            description: "Please sign in again to submit your exam.",
+            variant: "destructive",
+          });
+          navigate("/auth");
+          return;
+        }
+        toast({
+          title: "Could not submit exam",
+          description: "Something went wrong grading your exam. Please try again.",
+          variant: "destructive",
+        });
+        return;
+      }
     } else {
       setResult({ correct: 0, total: questions.length, time: totalTime });
       setReview([]);
     }
 
     setPhase("results");
-  }, [answers, questions, timeRemaining, timeLimit, sessionId]);
+  }, [answers, questions, timeRemaining, timeLimit, sessionId, toast, navigate]);
 
   const selectAnswer = (qId: number, answer: string) => {
     setAnswers((prev) => ({ ...prev, [qId]: answer }));

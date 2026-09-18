@@ -55,9 +55,15 @@ if (!sessionSecret) {
       "SESSION_SECRET is required in production. Set a long random value.",
     );
   }
+  // NOTE (dev only): this ephemeral secret is regenerated on every boot, so
+  // every existing session cookie becomes invalid on restart and developers are
+  // logged out on each `npm run dev` restart. This is expected, not a bug. To
+  // keep local sessions stable across restarts, set a fixed SESSION_SECRET in
+  // your .env (see .env.example). Production never reaches this branch because
+  // the block above throws when SESSION_SECRET is unset.
   sessionSecret = randomBytes(32).toString("hex");
   console.warn(
-    "[security] SESSION_SECRET is not set; using an ephemeral secret. Sessions will not survive a restart. Set SESSION_SECRET for stable sessions.",
+    "[security] SESSION_SECRET is not set; using an ephemeral secret. Sessions will NOT survive a restart (you will be logged out on each restart). Set SESSION_SECRET in .env for stable local sessions.",
   );
 }
 

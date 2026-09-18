@@ -53,7 +53,9 @@ function AppRouter() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/practice" component={Practice} />
-      <Route path="/cbt" component={CBT} />
+      <Route path="/cbt">
+        <ProtectedRoute component={CBT} />
+      </Route>
       <Route path="/study-tips" component={StudyTips} />
       <Route path="/auth" component={Auth} />
       <Route path="/history">
