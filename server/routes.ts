@@ -2,8 +2,10 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { fromError } from "zod-validation-error";
+import { z } from "zod";
 import type { ZodError, ZodTypeAny } from "zod";
 import { storage } from "./storage";
+import type { Question } from "@shared/schema";
 import {
   insertQuizSessionSchema,
   insertQuestionSchema,
@@ -11,6 +13,19 @@ import {
   insertSubjectSchema,
   insertTopicSchema,
 } from "@shared/schema";
+
+// Strip answer-revealing fields (correctAnswer, explanation, textbookRef) from a
+// question so it is safe to send to the client during an active CBT quiz.
+function sanitizeQuestionForCbt(q: Question) {
+  const { correctAnswer, explanation, textbookRef, ...safe } = q;
+  return safe;
+}
+
+// Body schema for server-side CBT grading.
+const gradeSubmissionSchema = z.object({
+  answers: z.record(z.string(), z.string()),
+  timeSpentSeconds: z.number().int().nonnegative().optional(),
+});
 
 // Admin password (set via env only; no default). When unset/empty, admin
 // access fails safe: all admin routes reject with 401.
@@ -115,6 +130,24 @@ export async function registerRoutes(
     res.json({ questions: qs, total });
   });
 
+  // Sanitized questions for CBT/exam mode. Same filtered set as /api/questions
+  // but with correctAnswer/explanation/textbookRef stripped so answers are never
+  // exposed to the client during an active quiz. Grading happens server-side.
+  app.get("/api/quiz/questions", async (req, res) => {
+    const filters = {
+      examBodyId: req.query.examBodyId ? parseInt(req.query.examBodyId as string) : undefined,
+      subjectId: req.query.subjectId ? parseInt(req.query.subjectId as string) : undefined,
+      topicId: req.query.topicId ? parseInt(req.query.topicId as string) : undefined,
+      year: req.query.year ? parseInt(req.query.year as string) : undefined,
+      difficulty: req.query.difficulty as string | undefined,
+      limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+      offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
+    };
+    const qs = await storage.getQuestions(filters);
+    const total = await storage.getQuestionCount(filters);
+    res.json({ questions: qs.map(sanitizeQuestionForCbt), total });
+  });
+
   // Single question
   app.get("/api/questions/:id", async (req, res) => {
     const id = parseInt(String(req.params.id));
@@ -172,6 +205,77 @@ export async function registerRoutes(
     const session = await storage.updateQuizSession(id, result.data);
     if (!session) return res.status(404).json({ message: "Session not found" });
     res.json(session);
+  });
+
+  // Server-side CBT grading. Accepts the submitted answers, computes the score
+  // against the stored correct answers, persists the session, and returns the
+  // review payload. Correct answers/explanations are revealed ONLY here.
+  app.post("/api/quiz-sessions/:id/submit", async (req, res) => {
+    const id = parseInt(String(req.params.id));
+    if (Number.isNaN(id)) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+    const session = await storage.getQuizSession(id);
+    if (!session) return res.status(404).json({ message: "Session not found" });
+
+    const data = validateBody(gradeSubmissionSchema, req, res);
+    if (!data) return;
+
+    const { answers, timeSpentSeconds } = data;
+    const questionIds = Object.keys(answers)
+      .map((k) => parseInt(k, 10))
+      .filter((n) => !Number.isNaN(n));
+
+    let correct = 0;
+    const review: Array<{
+      questionId: number;
+      questionText: string;
+      options: { label: string; value: string }[];
+      yourAnswer: string | null;
+      correctAnswer: string;
+      isCorrect: boolean;
+      explanation: string;
+    }> = [];
+
+    for (const qId of questionIds) {
+      const q = await storage.getQuestion(qId);
+      if (!q) continue;
+      const yourAnswer = answers[String(qId)] ?? null;
+      const isCorrect = yourAnswer === q.correctAnswer;
+      if (isCorrect) correct++;
+      const options = [
+        { label: "A", value: q.optionA },
+        { label: "B", value: q.optionB },
+        { label: "C", value: q.optionC },
+        { label: "D", value: q.optionD },
+        ...(q.optionE ? [{ label: "E", value: q.optionE }] : []),
+      ];
+      review.push({
+        questionId: q.id,
+        questionText: q.questionText,
+        options,
+        yourAnswer,
+        correctAnswer: q.correctAnswer,
+        isCorrect,
+        explanation: q.explanation,
+      });
+    }
+
+    const total = questionIds.length;
+    const percentage = total > 0 ? Math.round((correct / total) * 100) : 0;
+
+    await storage.updateQuizSession(id, {
+      answeredQuestions: Object.keys(answers).length,
+      correctAnswers: correct,
+      timeSpentSeconds: timeSpentSeconds ?? session.timeSpentSeconds,
+      status: "completed",
+      answersJson: JSON.stringify(answers),
+    });
+
+    res.json({
+      score: { correct, total, percentage },
+      review,
+    });
   });
 
   // ============ ADMIN ROUTES (password protected) ============

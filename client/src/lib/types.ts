@@ -36,6 +36,26 @@ export interface Question {
   textbookRef: string | null;
 }
 
+// Question shape returned during an active CBT quiz: answer-revealing fields
+// (correctAnswer, explanation, textbookRef) are stripped server-side.
+export type CbtQuestion = Omit<Question, "correctAnswer" | "explanation" | "textbookRef">;
+
+// Per-question review item returned by the server-side grading endpoint.
+export interface CbtReviewItem {
+  questionId: number;
+  questionText: string;
+  options: { label: string; value: string }[];
+  yourAnswer: string | null;
+  correctAnswer: string;
+  isCorrect: boolean;
+  explanation: string;
+}
+
+export interface CbtGradeResponse {
+  score: { correct: number; total: number; percentage: number };
+  review: CbtReviewItem[];
+}
+
 export interface StudyTip {
   id: number;
   subjectId: number;
