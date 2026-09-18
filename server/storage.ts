@@ -10,6 +10,7 @@ import {
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, sql, inArray } from "drizzle-orm";
+import { matchDuplicate } from "./ingest/normalize";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is required");
@@ -45,6 +46,15 @@ export interface IStorage {
     offset?: number;
   }): Promise<Question[]>;
   getQuestion(id: number): Promise<Question | undefined>;
+  // Find an existing question that collides with the given key under the
+  // canonical dedupe semantics (normalized questionText + examBodyId +
+  // subjectId + year). Returns the first match or undefined.
+  findDuplicateQuestion(key: {
+    questionText: string;
+    examBodyId: number;
+    subjectId: number;
+    year: number;
+  }): Promise<Question | undefined>;
   getQuestionCount(filters: {
     examBodyId?: number;
     subjectId?: number;
@@ -155,6 +165,33 @@ export class DatabaseStorage implements IStorage {
   async getQuestion(id: number): Promise<Question | undefined> {
     const rows = await db.select().from(questions).where(eq(questions.id, id));
     return rows[0];
+  }
+
+  // Duplicate detection. The dedupe key is: normalized questionText (lowercased,
+  // trimmed, internal whitespace collapsed to single spaces) + examBodyId +
+  // subjectId + year. We narrow to the (examBodyId, subjectId, year) triple in
+  // SQL — a small candidate set — then compare normalized text in JS using the
+  // exact same normalization as computeDedupeKey so cosmetic whitespace/case
+  // differences do not defeat de-duplication.
+  async findDuplicateQuestion(key: {
+    questionText: string;
+    examBodyId: number;
+    subjectId: number;
+    year: number;
+  }): Promise<Question | undefined> {
+    const candidates = await db
+      .select()
+      .from(questions)
+      .where(
+        and(
+          eq(questions.examBodyId, key.examBodyId),
+          eq(questions.subjectId, key.subjectId),
+          eq(questions.year, key.year),
+        ),
+      );
+    // Delegate the normalized-text comparison to the pure matcher so the
+    // matching logic is unit-testable without Postgres (see tests/ingest.test.ts).
+    return matchDuplicate(candidates, key);
   }
 
   async getQuestionCount(filters: {

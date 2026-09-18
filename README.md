@@ -140,6 +140,127 @@ By convention, any database-gated integration tests run only when a real
 Postgres is reachable. To enable that subset, point `DATABASE_URL` at a
 reachable Postgres instance and run `npm run db:push` first, then `npm test`.
 
+## Importing content
+
+Questions can be added in bulk through two avenues that share the same core:
+they normalize each record, resolve entities **by name**, de-duplicate, and
+insert. Both reference the exam body, subject, and topic by their **names**
+(not numeric ids).
+
+Resolution rules (identical for both avenues):
+
+- **Subjects and topics are auto-created** when their names are new
+  (case-insensitive). Repeated names within one import map to a single row.
+- **Exam bodies are rejected when unknown** — they are a small fixed seeded set
+  (`WAEC`, `NECO`, `JAMB`) and are never auto-created, so a typo surfaces as a
+  row error instead of silently creating a new body.
+- **De-duplication is idempotent.** The dedupe key is the *normalized*
+  `questionText` (lowercased, trimmed, internal whitespace collapsed) combined
+  with the resolved `examBodyId`, `subjectId`, and `year`. Re-importing the same
+  content skips the duplicates rather than inserting them again, so imports are
+  safe to re-run.
+
+Both avenues return a report: `{ created, skippedDuplicates, total, errors }`,
+where `errors` is a list of `{ row, message }` (1-based row numbers).
+
+### CSV column spec
+
+The canonical column order is:
+
+```
+examBody,subject,topic,year,questionNumber,questionText,optionA,optionB,optionC,optionD,optionE,correctAnswer,explanation,difficulty,textbookRef
+```
+
+| Column | Required | Notes |
+| --- | --- | --- |
+| `examBody` | Yes | Name of a seeded exam body: `WAEC`, `NECO`, or `JAMB`. Unknown names are rejected. |
+| `subject` | Yes | Subject name; auto-created if new. |
+| `topic` | No | Topic name within the subject; auto-created if new. Blank means no topic. |
+| `year` | Yes | Positive integer year. |
+| `questionNumber` | No | Integer; blank allowed. |
+| `questionText` | Yes | The question. |
+| `optionA`–`optionD` | Yes | All four are required. |
+| `optionE` | No | Optional fifth option; required only if `correctAnswer` is `E`. |
+| `correctAnswer` | Yes | One of `A`–`E` (case-insensitive), must point at a provided option. |
+| `explanation` | No | Falls back to a generic placeholder when empty. |
+| `difficulty` | No | `easy`, `medium`, or `hard`; defaults to `medium`. |
+| `textbookRef` | No | Free-text reference; blank allowed. |
+
+### JSON example
+
+A JSON import is an array of objects referencing entities by name:
+
+```json
+[
+  {
+    "examBody": "WAEC",
+    "subject": "Mathematics",
+    "topic": "Algebra",
+    "year": 2019,
+    "questionNumber": 1,
+    "questionText": "What is 2 + 2?",
+    "optionA": "3",
+    "optionB": "4",
+    "optionC": "5",
+    "optionD": "6",
+    "correctAnswer": "B",
+    "explanation": "Basic arithmetic: 2 + 2 = 4.",
+    "difficulty": "easy"
+  }
+]
+```
+
+### Admin UI
+
+In the admin area, open the **Import** tab:
+
+1. Choose the format (**CSV** or **JSON**).
+2. Paste the content into the textarea, or **upload** a `.csv`/`.json` file
+   (its text is loaded into the textarea).
+3. Use **Download CSV template** / **Download JSON sample** to get a
+   ready-to-fill starting point.
+4. Click **Import** to see the `created` / `skippedDuplicates` / `total` counts
+   and an expandable list of per-row errors.
+
+The import posts to `POST /api/admin/questions/import` (admin-only). The older
+`POST /api/admin/questions/bulk` endpoint (raw numeric-id JSON array) is
+unchanged.
+
+### CLI (`npm run ingest`)
+
+`script/ingest.ts` is a `tsx` dev tool (not part of the server bundle) that runs
+the same normalize + dedupe + insert core from the command line via a pluggable
+`SourceAdapter` interface. It requires `DATABASE_URL`.
+
+Import from a local file (CSV or JSON):
+
+```bash
+npm run ingest -- --source=file --file=path/to/questions.csv
+npm run ingest -- --source=file --file=path/to/questions.json
+```
+
+For a JSON file whose elements are raw ALOC v2 items, add `--aloc-json` to map
+them through the ALOC adapter shape.
+
+Import from the [ALOC](https://questions.aloc.com.ng/) question bank:
+
+```bash
+npm run ingest -- --source=aloc --subject=english --type=utme --year=2019 --count=20
+```
+
+The ALOC source reads its token from `ALOC_ACCESS_TOKEN` (a free token from the
+ALOC playground). If the token is unset, the CLI prints a message explaining how
+to obtain one and exits cleanly **without** hardcoding any token. It requests a
+single batch from `/api/v2/m` (falling back to `/api/v2/q`), caps the mapped
+items to `--count` (default `20`), and does not hammer the API.
+
+Notes:
+
+- A **live ALOC fetch was not exercised in-sandbox** (no token available); the
+  ALOC mapping is covered by fixture unit tests instead.
+- **ALOC images are ignored.** The questions schema has no media column, so the
+  `image` field on ALOC items is intentionally dropped (out of scope).
+
 ## Docker
 
 The repo ships a multi-stage `Dockerfile`. The build stage installs all
@@ -190,6 +311,7 @@ Mirror `.env.example`. Copy it to `.env` and fill in real values; never commit
 | `ADMIN_PASSWORD` | No | none | Password for the first-admin account (scrypt-hashed at seed time). |
 | `PORT` | No | `5000` | HTTP port the server listens on. |
 | `NODE_ENV` | No | `development` | Node environment: `development` or `production`. |
+| `ALOC_ACCESS_TOKEN` | No | none | Access token for the ALOC source of the ingestion CLI (`npm run ingest -- --source=aloc ...`). Free token from the [ALOC playground](https://questions.aloc.com.ng/). Read from the environment only; never commit a real token. |
 
 ## Project structure
 
@@ -202,6 +324,11 @@ server/
   auth.ts      Passport local strategy, session wiring, and password helpers (re-exported)
   password.ts  scrypt hashPassword / verifyPassword helpers
   grading.ts   Pure CBT grading function used by the submit route
+  analytics.ts Pure per-user analytics aggregation used by the analytics route
+  ingest/      Pure, DB-free ingestion core: normalize.ts (normalizer + dedupe key),
+               adapters.ts (dependency-free CSV parser + ALOC mapping), resolve.ts
+               (DB-backed ResolutionContext factory: auto-create subjects/topics,
+               reject unknown exam bodies) shared by the import endpoint and CLI
   static.ts    Production static serving of the built client from dist/public
   vite.ts      Vite dev middleware wiring (development only)
 shared/
@@ -210,6 +337,7 @@ client/
   src/         React 18 SPA (Vite, Wouter, TanStack Query, Tailwind + shadcn)
 script/
   build.ts     Client + server build (Vite + esbuild) with a runtime dependency allowlist
+  ingest.ts    Pluggable content-ingestion CLI (`npm run ingest`): file + ALOC adapters
   verify-auth.ts  In-process auth verification harness (not part of the test suite)
 tests/         Vitest suites: auth.test.ts, schema.test.ts, grading.test.ts
 .github/workflows/ci.yml  GitHub Actions CI pipeline

@@ -138,6 +138,19 @@ export interface WeakTopic {
   accuracy: number;
 }
 
+// Supported payload formats for the name-aware question import endpoint
+// (POST /api/admin/questions/import).
+export type ImportFormat = "csv" | "json";
+
+// Per-row import report returned by POST /api/admin/questions/import. `errors`
+// carries a 1-based row number plus a human-readable message per failed row.
+export interface ImportReport {
+  created: number;
+  skippedDuplicates: number;
+  total: number;
+  errors: { row: number; message: string }[];
+}
+
 export interface Analytics {
   trend: TrendPoint[];
   perSubject: GroupBreakdown[];

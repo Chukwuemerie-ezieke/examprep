@@ -15,8 +15,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/use-auth";
 import { Logo } from "@/components/Logo";
-import type { ExamBody, Subject, Question, StudyTip } from "@/lib/types";
-import { ArrowLeft, Plus, Trash2, Pencil, Upload, X, Save } from "lucide-react";
+import type { ExamBody, Subject, Question, StudyTip, ImportFormat, ImportReport } from "@/lib/types";
+import { ArrowLeft, Plus, Trash2, Pencil, Upload, X, Save, Download } from "lucide-react";
 
 // ============ QUESTION FORM ============
 const EMPTY_Q = {
@@ -462,18 +462,25 @@ function SubjectsTab({ subjects }: { subjects: Subject[] }) {
   );
 }
 
-// ============ BULK IMPORT TAB ============
-function BulkTab() {
-  const { toast } = useToast();
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ created: number; total: number; errors: string[] } | null>(null);
+// ============ IMPORT TAB ============
+// Canonical CSV column order — mirrors server/ingest/adapters.ts CSV_COLUMNS.
+// Kept inline so the client does not import server code. topic, questionNumber,
+// optionE, explanation, difficulty and textbookRef are optional.
+const CSV_HEADER =
+  "examBody,subject,topic,year,questionNumber,questionText,optionA,optionB,optionC,optionD,optionE,correctAnswer,explanation,difficulty,textbookRef";
+const CSV_TEMPLATE =
+  CSV_HEADER +
+  "\n" +
+  "WAEC,Mathematics,Algebra,2019,1,What is 2 + 2?,3,4,5,6,,B,2 + 2 = 4,easy,";
 
-  const sample = `[
+// JSON sample references exam body / subject / topic BY NAME (not numeric ids).
+const JSON_SAMPLE = `[
   {
-    "examBodyId": 1,
-    "subjectId": 1,
-    "year": 2024,
+    "examBody": "WAEC",
+    "subject": "Mathematics",
+    "topic": "Algebra",
+    "year": 2019,
+    "questionNumber": 1,
     "questionText": "What is 2 + 2?",
     "optionA": "3",
     "optionB": "4",
@@ -485,16 +492,48 @@ function BulkTab() {
   }
 ]`;
 
+// Trigger a client-side file download of the given text content.
+function downloadText(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function BulkTab() {
+  const { toast } = useToast();
+  const [format, setFormat] = useState<ImportFormat>("csv");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ImportReport | null>(null);
+
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Infer the format from the file extension when unambiguous.
+    if (file.name.toLowerCase().endsWith(".json")) setFormat("json");
+    else if (file.name.toLowerCase().endsWith(".csv")) setFormat("csv");
+    const reader = new FileReader();
+    reader.onload = () => setText(String(reader.result ?? ""));
+    reader.onerror = () => toast({ title: "Could not read file", variant: "destructive" });
+    reader.readAsText(file);
+    // Reset the input so selecting the same file again re-triggers onChange.
+    e.target.value = "";
+  }
+
   async function run() {
     setBusy(true);
     setResult(null);
     try {
-      const items = JSON.parse(text);
-      if (!Array.isArray(items)) throw new Error("JSON must be an array");
-      const res = await apiRequest("POST", "/api/admin/questions/bulk", items);
-      const json = await res.json();
+      const res = await apiRequest("POST", "/api/admin/questions/import", { format, data: text });
+      const json = (await res.json()) as ImportReport;
       setResult(json);
-      toast({ title: `Imported ${json.created} of ${json.total}` });
+      toast({ title: `Imported ${json.created} of ${json.total}`, description: json.skippedDuplicates ? `${json.skippedDuplicates} duplicate(s) skipped` : undefined });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/questions-list"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
     } catch (err: any) {
@@ -507,32 +546,83 @@ function BulkTab() {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm flex items-center gap-2"><Upload className="w-4 h-4" /> Bulk Import (JSON)</CardTitle>
+        <CardTitle className="text-sm flex items-center gap-2"><Upload className="w-4 h-4" /> Import Questions</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Paste an array of question objects. Required fields: examBodyId (1=WAEC, 2=NECO, 3=JAMB), subjectId, year, questionText, optionA-D, correctAnswer, explanation, difficulty.
+          Import questions as CSV or JSON. Reference the exam body, subject and topic BY NAME
+          (e.g. <code>WAEC</code>, <code>Mathematics</code>, <code>Algebra</code>) — no numeric ids needed.
+          Unknown subjects and topics are auto-created; unknown exam bodies are rejected.
+          Re-importing the same question (same normalized text + exam body + subject + year) is skipped as a duplicate.
         </p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="w-28">
+            <Label className="text-xs">Format</Label>
+            <Select value={format} onValueChange={(v) => setFormat(v as ImportFormat)}>
+              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="csv">CSV</SelectItem>
+                <SelectItem value="json">JSON</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex-1 min-w-[10rem]">
+            <Label className="text-xs">Upload file</Label>
+            <Input
+              type="file"
+              accept=".csv,.json,application/json,text/csv"
+              onChange={onFile}
+              className="h-8 text-xs file:text-xs"
+            />
+          </div>
+        </div>
+
         <Textarea
           rows={12}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={sample}
+          placeholder={format === "csv" ? CSV_TEMPLATE : JSON_SAMPLE}
           className="font-mono text-xs"
         />
-        <div className="flex justify-between items-center">
-          <Button variant="ghost" size="sm" onClick={() => setText(sample)} className="text-xs">Load sample</Button>
+
+        <div className="flex flex-wrap justify-between items-center gap-2">
+          <div className="flex flex-wrap gap-2">
+            {format === "csv" ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setText(CSV_TEMPLATE)} className="text-xs">Load CSV template</Button>
+                <Button variant="ghost" size="sm" onClick={() => downloadText("questions-template.csv", CSV_TEMPLATE, "text/csv")} className="text-xs gap-1">
+                  <Download className="w-3 h-3" /> Download CSV template
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setText(JSON_SAMPLE)} className="text-xs">Load JSON sample</Button>
+                <Button variant="ghost" size="sm" onClick={() => downloadText("questions-sample.json", JSON_SAMPLE, "application/json")} className="text-xs gap-1">
+                  <Download className="w-3 h-3" /> Download JSON sample
+                </Button>
+              </>
+            )}
+          </div>
           <Button onClick={run} disabled={busy || !text} className="gap-2">
             <Upload className="w-4 h-4" /> {busy ? "Importing..." : "Import"}
           </Button>
         </div>
+
         {result && (
           <div className="bg-muted p-3 rounded text-xs space-y-1">
-            <p className="font-medium">Created {result.created} of {result.total}</p>
+            <p className="font-medium">
+              Created {result.created} of {result.total}
+              {result.skippedDuplicates > 0 && (
+                <span className="ml-2 text-[10px] text-muted-foreground">({result.skippedDuplicates} duplicate(s) skipped)</span>
+              )}
+            </p>
             {result.errors.length > 0 && (
               <details>
-                <summary className="cursor-pointer text-destructive">{result.errors.length} errors</summary>
-                <pre className="mt-2 whitespace-pre-wrap">{result.errors.join("\n")}</pre>
+                <summary className="cursor-pointer text-destructive">{result.errors.length} error(s)</summary>
+                <pre className="mt-2 whitespace-pre-wrap">
+                  {result.errors.map((e) => `Row ${e.row}: ${e.message}`).join("\n")}
+                </pre>
               </details>
             )}
           </div>
@@ -595,7 +685,7 @@ export default function Admin() {
             <TabsTrigger value="questions">Questions</TabsTrigger>
             <TabsTrigger value="tips">Study Tips</TabsTrigger>
             <TabsTrigger value="subjects">Subjects</TabsTrigger>
-            <TabsTrigger value="bulk">Bulk Import</TabsTrigger>
+            <TabsTrigger value="bulk">Import</TabsTrigger>
           </TabsList>
           <TabsContent value="questions">
             {examBodies && subjects && (
