@@ -1,32 +1,32 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, serial } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Exam body: WAEC, NECO, JAMB
-export const examBodies = sqliteTable("exam_bodies", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const examBodies = pgTable("exam_bodies", {
+  id: serial("id").primaryKey(),
   name: text("name").notNull(), // WAEC, NECO, JAMB
   fullName: text("full_name").notNull(),
   description: text("description"),
 });
 
 // Subjects: Mathematics, English, Physics, Chemistry
-export const subjects = sqliteTable("subjects", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const subjects = pgTable("subjects", {
+  id: serial("id").primaryKey(),
   name: text("name").notNull(),
   icon: text("icon"), // lucide icon name
 });
 
 // Topics within subjects
-export const topics = sqliteTable("topics", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const topics = pgTable("topics", {
+  id: serial("id").primaryKey(),
   subjectId: integer("subject_id").notNull(),
   name: text("name").notNull(),
 });
 
 // Questions
-export const questions = sqliteTable("questions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const questions = pgTable("questions", {
+  id: serial("id").primaryKey(),
   examBodyId: integer("exam_body_id").notNull(),
   subjectId: integer("subject_id").notNull(),
   topicId: integer("topic_id"),
@@ -45,8 +45,8 @@ export const questions = sqliteTable("questions", {
 });
 
 // Study tips per subject/topic
-export const studyTips = sqliteTable("study_tips", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const studyTips = pgTable("study_tips", {
+  id: serial("id").primaryKey(),
   subjectId: integer("subject_id").notNull(),
   topicId: integer("topic_id"),
   title: text("title").notNull(),
@@ -54,8 +54,8 @@ export const studyTips = sqliteTable("study_tips", {
 });
 
 // User quiz sessions (for CBT mode)
-export const quizSessions = sqliteTable("quiz_sessions", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const quizSessions = pgTable("quiz_sessions", {
+  id: serial("id").primaryKey(),
   examBodyId: integer("exam_body_id").notNull(),
   subjectId: integer("subject_id").notNull(),
   year: integer("year"),

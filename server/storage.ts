@@ -6,14 +6,17 @@ import {
   type StudyTip, type InsertStudyTip, studyTips,
   type QuizSession, type InsertQuizSession, quizSessions,
 } from "@shared/schema";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { eq, and, sql } from "drizzle-orm";
 
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is required");
+}
 
-export const db = drizzle(sqlite);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+export const db = drizzle(pool);
 
 export interface IStorage {
   // Exam bodies
@@ -74,35 +77,40 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getExamBodies(): Promise<ExamBody[]> {
-    return db.select().from(examBodies).all();
+    return db.select().from(examBodies);
   }
 
   async getExamBody(id: number): Promise<ExamBody | undefined> {
-    return db.select().from(examBodies).where(eq(examBodies.id, id)).get();
+    const rows = await db.select().from(examBodies).where(eq(examBodies.id, id));
+    return rows[0];
   }
 
   async createExamBody(body: InsertExamBody): Promise<ExamBody> {
-    return db.insert(examBodies).values(body).returning().get();
+    const rows = await db.insert(examBodies).values(body).returning();
+    return rows[0];
   }
 
   async getSubjects(): Promise<Subject[]> {
-    return db.select().from(subjects).all();
+    return db.select().from(subjects);
   }
 
   async getSubject(id: number): Promise<Subject | undefined> {
-    return db.select().from(subjects).where(eq(subjects.id, id)).get();
+    const rows = await db.select().from(subjects).where(eq(subjects.id, id));
+    return rows[0];
   }
 
   async createSubject(subject: InsertSubject): Promise<Subject> {
-    return db.insert(subjects).values(subject).returning().get();
+    const rows = await db.insert(subjects).values(subject).returning();
+    return rows[0];
   }
 
   async getTopics(subjectId: number): Promise<Topic[]> {
-    return db.select().from(topics).where(eq(topics.subjectId, subjectId)).all();
+    return db.select().from(topics).where(eq(topics.subjectId, subjectId));
   }
 
   async createTopic(topic: InsertTopic): Promise<Topic> {
-    return db.insert(topics).values(topic).returning().get();
+    const rows = await db.insert(topics).values(topic).returning();
+    return rows[0];
   }
 
   async getQuestions(filters: {
@@ -131,11 +139,12 @@ export class DatabaseStorage implements IStorage {
     if (filters.offset) {
       query = (query as any).offset(filters.offset);
     }
-    return (query as any).all();
+    return query;
   }
 
   async getQuestion(id: number): Promise<Question | undefined> {
-    return db.select().from(questions).where(eq(questions.id, id)).get();
+    const rows = await db.select().from(questions).where(eq(questions.id, id));
+    return rows[0];
   }
 
   async getQuestionCount(filters: {
@@ -154,8 +163,8 @@ export class DatabaseStorage implements IStorage {
     if (conditions.length > 0) {
       query = query.where(and(...conditions)) as any;
     }
-    const result = (query as any).get();
-    return result?.count ?? 0;
+    const rows = await query;
+    return Number(rows[0]?.count ?? 0);
   }
 
   async getAvailableYears(examBodyId?: number, subjectId?: number): Promise<number[]> {
@@ -167,73 +176,80 @@ export class DatabaseStorage implements IStorage {
     if (conditions.length > 0) {
       query = query.where(and(...conditions)) as any;
     }
-    const results = (query as any).all();
+    const results = await query;
     return results.map((r: any) => r.year).sort((a: number, b: number) => b - a);
   }
 
   async createQuestion(question: InsertQuestion): Promise<Question> {
-    return db.insert(questions).values(question).returning().get();
+    const rows = await db.insert(questions).values(question).returning();
+    return rows[0];
   }
 
   async updateQuestion(id: number, updates: Partial<InsertQuestion>): Promise<Question | undefined> {
-    return db.update(questions).set(updates).where(eq(questions.id, id)).returning().get();
+    const rows = await db.update(questions).set(updates).where(eq(questions.id, id)).returning();
+    return rows[0];
   }
 
   async deleteQuestion(id: number): Promise<boolean> {
-    const result = db.delete(questions).where(eq(questions.id, id)).run();
-    return result.changes > 0;
+    const rows = await db.delete(questions).where(eq(questions.id, id)).returning();
+    return rows.length > 0;
   }
 
   async getAllStudyTips(): Promise<StudyTip[]> {
-    return db.select().from(studyTips).all();
+    return db.select().from(studyTips);
   }
 
   async updateStudyTip(id: number, updates: Partial<InsertStudyTip>): Promise<StudyTip | undefined> {
-    return db.update(studyTips).set(updates).where(eq(studyTips.id, id)).returning().get();
+    const rows = await db.update(studyTips).set(updates).where(eq(studyTips.id, id)).returning();
+    return rows[0];
   }
 
   async deleteStudyTip(id: number): Promise<boolean> {
-    const result = db.delete(studyTips).where(eq(studyTips.id, id)).run();
-    return result.changes > 0;
+    const rows = await db.delete(studyTips).where(eq(studyTips.id, id)).returning();
+    return rows.length > 0;
   }
 
   async deleteTopic(id: number): Promise<boolean> {
-    const result = db.delete(topics).where(eq(topics.id, id)).run();
-    return result.changes > 0;
+    const rows = await db.delete(topics).where(eq(topics.id, id)).returning();
+    return rows.length > 0;
   }
 
   async updateSubject(id: number, updates: Partial<InsertSubject>): Promise<Subject | undefined> {
-    return db.update(subjects).set(updates).where(eq(subjects.id, id)).returning().get();
+    const rows = await db.update(subjects).set(updates).where(eq(subjects.id, id)).returning();
+    return rows[0];
   }
 
   async getStudyTips(subjectId: number, topicId?: number): Promise<StudyTip[]> {
     if (topicId) {
       return db.select().from(studyTips).where(
         and(eq(studyTips.subjectId, subjectId), eq(studyTips.topicId, topicId))
-      ).all();
+      );
     }
-    return db.select().from(studyTips).where(eq(studyTips.subjectId, subjectId)).all();
+    return db.select().from(studyTips).where(eq(studyTips.subjectId, subjectId));
   }
 
   async createStudyTip(tip: InsertStudyTip): Promise<StudyTip> {
-    return db.insert(studyTips).values(tip).returning().get();
+    const rows = await db.insert(studyTips).values(tip).returning();
+    return rows[0];
   }
 
   async getQuizSessions(): Promise<QuizSession[]> {
-    return db.select().from(quizSessions).all();
+    return db.select().from(quizSessions);
   }
 
   async getQuizSession(id: number): Promise<QuizSession | undefined> {
-    return db.select().from(quizSessions).where(eq(quizSessions.id, id)).get();
+    const rows = await db.select().from(quizSessions).where(eq(quizSessions.id, id));
+    return rows[0];
   }
 
   async createQuizSession(session: InsertQuizSession): Promise<QuizSession> {
-    return db.insert(quizSessions).values(session).returning().get();
+    const rows = await db.insert(quizSessions).values(session).returning();
+    return rows[0];
   }
 
   async updateQuizSession(id: number, updates: Partial<QuizSession>): Promise<QuizSession | undefined> {
-    const result = db.update(quizSessions).set(updates).where(eq(quizSessions.id, id)).returning().get();
-    return result;
+    const rows = await db.update(quizSessions).set(updates).where(eq(quizSessions.id, id)).returning();
+    return rows[0];
   }
 }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Clock, Play, CheckCircle2, XCircle, Trophy, RotateCcw, BookOpen } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { ExamBody, Subject, Question, QuizSession } from "@/lib/types";
+import type { ExamBody, Subject, CbtQuestion, CbtReviewItem, CbtGradeResponse } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 
 type Phase = "setup" | "quiz" | "results";
@@ -24,11 +24,12 @@ export default function CBT() {
 
   // Quiz state
   const [sessionId, setSessionId] = useState<number | null>(null);
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const [questions, setQuestions] = useState<CbtQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [result, setResult] = useState<{ correct: number; total: number; time: number } | null>(null);
+  const [review, setReview] = useState<CbtReviewItem[]>([]);
 
   const { data: examBodies } = useQuery<ExamBody[]>({ queryKey: ["/api/exam-bodies"] });
   const { data: subjects } = useQuery<Subject[]>({ queryKey: ["/api/subjects"] });
@@ -74,7 +75,7 @@ export default function CBT() {
     p.set("subjectId", subjectId);
     if (year) p.set("year", year);
     p.set("limit", questionCount);
-    const res = await apiRequest("GET", `/api/questions?${p}`);
+    const res = await apiRequest("GET", `/api/quiz/questions?${p}`);
     const data = await res.json();
 
     if (!data.questions?.length) return;
@@ -107,23 +108,25 @@ export default function CBT() {
 
   const handleSubmit = useCallback(async () => {
     const totalTime = parseInt(timeLimit) * 60 - timeRemaining;
-    let correct = 0;
-    for (const q of questions) {
-      if (answers[q.id] === q.correctAnswer) correct++;
-    }
-
-    setResult({ correct, total: questions.length, time: totalTime });
 
     if (sessionId) {
-      await apiRequest("PATCH", `/api/quiz-sessions/${sessionId}`, {
-        answeredQuestions: Object.keys(answers).length,
-        correctAnswers: correct,
+      // Grade server-side: the server computes the score against the stored
+      // correct answers and returns the review with answers/explanations.
+      const res = await apiRequest("POST", `/api/quiz-sessions/${sessionId}/submit`, {
+        // Send every served question id (answered or not) so grading and the
+        // review cover the full quiz; skipped questions score as incorrect.
+        questionIds: questions.map((q) => q.id),
+        answers,
         timeSpentSeconds: totalTime,
-        status: "completed",
-        answersJson: JSON.stringify(answers),
       });
+      const data: CbtGradeResponse = await res.json();
+      setResult({ correct: data.score.correct, total: data.score.total, time: totalTime });
+      setReview(data.review);
       queryClient.invalidateQueries({ queryKey: ["/api/quiz-sessions"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+    } else {
+      setResult({ correct: 0, total: questions.length, time: totalTime });
+      setReview([]);
     }
 
     setPhase("results");
@@ -285,27 +288,37 @@ export default function CBT() {
           {/* Review answers */}
           <h3 className="text-sm font-semibold text-foreground mb-3">Review Your Answers</h3>
           <div className="space-y-3">
-            {questions.map((q, idx) => {
-              const userAnswer = answers[q.id];
-              const isCorrect = userAnswer === q.correctAnswer;
+            {review.map((item, idx) => {
+              const isCorrect = item.isCorrect;
+              const yourOption = item.yourAnswer
+                ? item.options.find((o) => o.label === item.yourAnswer)
+                : undefined;
+              const correctOption = item.options.find((o) => o.label === item.correctAnswer);
               return (
-                <Card key={q.id} className="border border-border" data-testid={`card-review-${q.id}`}>
+                <Card key={item.questionId} className="border border-border" data-testid={`card-review-${item.questionId}`}>
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
                       <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${isCorrect ? "bg-green-500" : "bg-red-500"}`}>
                         {isCorrect ? <CheckCircle2 className="w-3.5 h-3.5 text-white" /> : <XCircle className="w-3.5 h-3.5 text-white" />}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-foreground font-medium mb-1">Q{idx + 1}. {q.questionText}</p>
-                        {!isCorrect && userAnswer && (
+                        <p className="text-sm text-foreground font-medium mb-1">Q{idx + 1}. {item.questionText}</p>
+                        {!isCorrect && item.yourAnswer && (
                           <p className="text-xs text-red-600 dark:text-red-400 mb-0.5">
-                            Your answer: {userAnswer} — {q[`option${userAnswer}` as keyof Question]}
+                            Your answer: {item.yourAnswer} — {yourOption?.value}
                           </p>
                         )}
-                        <p className="text-xs text-green-600 dark:text-green-400 mb-1">
-                          Correct: {q.correctAnswer} — {q[`option${q.correctAnswer}` as keyof Question]}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{q.explanation}</p>
+                        {!isCorrect && !item.yourAnswer && item.correctAnswer && (
+                          <p className="text-xs text-red-600 dark:text-red-400 mb-0.5">
+                            Not answered
+                          </p>
+                        )}
+                        {item.correctAnswer && (
+                          <p className="text-xs text-green-600 dark:text-green-400 mb-1">
+                            Correct: {item.correctAnswer} — {correctOption?.value}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground">{item.explanation}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -315,7 +328,7 @@ export default function CBT() {
           </div>
 
           <div className="flex gap-3 mt-6">
-            <Button onClick={() => { setPhase("setup"); setResult(null); }} variant="outline" className="gap-2 flex-1" data-testid="button-new-exam">
+            <Button onClick={() => { setPhase("setup"); setResult(null); setReview([]); }} variant="outline" className="gap-2 flex-1" data-testid="button-new-exam">
               <RotateCcw className="w-4 h-4" /> New Exam
             </Button>
             <Link href="/" className="flex-1">

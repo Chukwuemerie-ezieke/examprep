@@ -1,46 +1,58 @@
 import { db } from "./storage";
 import { examBodies, subjects, topics, questions, studyTips } from "@shared/schema";
 
-export function seedDatabase() {
+export async function seedDatabase() {
   // Check if already seeded
-  const existingBodies = db.select().from(examBodies).all();
+  const existingBodies = await db.select().from(examBodies);
   if (existingBodies.length > 0) return;
 
   // Exam bodies
-  const waec = db.insert(examBodies).values({ name: "WAEC", fullName: "West African Examinations Council", description: "Senior School Certificate Examination (SSCE/WASSCE)" }).returning().get();
-  const neco = db.insert(examBodies).values({ name: "NECO", fullName: "National Examinations Council", description: "Senior School Certificate Examination" }).returning().get();
-  const jamb = db.insert(examBodies).values({ name: "JAMB", fullName: "Joint Admissions and Matriculation Board", description: "Unified Tertiary Matriculation Examination (UTME)" }).returning().get();
+  const waec = (await db.insert(examBodies).values({ name: "WAEC", fullName: "West African Examinations Council", description: "Senior School Certificate Examination (SSCE/WASSCE)" }).returning())[0];
+  const neco = (await db.insert(examBodies).values({ name: "NECO", fullName: "National Examinations Council", description: "Senior School Certificate Examination" }).returning())[0];
+  const jamb = (await db.insert(examBodies).values({ name: "JAMB", fullName: "Joint Admissions and Matriculation Board", description: "Unified Tertiary Matriculation Examination (UTME)" }).returning())[0];
 
   // Subjects
-  const maths = db.insert(subjects).values({ name: "Mathematics", icon: "calculator" }).returning().get();
-  const english = db.insert(subjects).values({ name: "English Language", icon: "book-open" }).returning().get();
-  const physics = db.insert(subjects).values({ name: "Physics", icon: "atom" }).returning().get();
-  const chemistry = db.insert(subjects).values({ name: "Chemistry", icon: "flask-conical" }).returning().get();
+  const maths = (await db.insert(subjects).values({ name: "Mathematics", icon: "calculator" }).returning())[0];
+  const english = (await db.insert(subjects).values({ name: "English Language", icon: "book-open" }).returning())[0];
+  const physics = (await db.insert(subjects).values({ name: "Physics", icon: "atom" }).returning())[0];
+  const chemistry = (await db.insert(subjects).values({ name: "Chemistry", icon: "flask-conical" }).returning())[0];
 
   // Topics for Mathematics
-  const mathTopics = [
+  const mathTopics = [];
+  for (const name of [
     "Number and Numeration", "Algebra", "Geometry and Mensuration",
     "Trigonometry", "Statistics and Probability", "Calculus", "Sets and Logic"
-  ].map(name => db.insert(topics).values({ subjectId: maths.id, name }).returning().get());
+  ]) {
+    mathTopics.push((await db.insert(topics).values({ subjectId: maths.id, name }).returning())[0]);
+  }
 
   // Topics for English
-  const engTopics = [
+  const engTopics = [];
+  for (const name of [
     "Comprehension", "Lexis and Structure", "Oral English",
     "Essay Writing", "Summary Writing", "Literary Appreciation"
-  ].map(name => db.insert(topics).values({ subjectId: english.id, name }).returning().get());
+  ]) {
+    engTopics.push((await db.insert(topics).values({ subjectId: english.id, name }).returning())[0]);
+  }
 
   // Topics for Physics
-  const phyTopics = [
+  const phyTopics = [];
+  for (const name of [
     "Mechanics", "Waves and Sound", "Heat and Thermodynamics",
     "Electricity and Magnetism", "Optics", "Modern Physics", "Nuclear Physics"
-  ].map(name => db.insert(topics).values({ subjectId: physics.id, name }).returning().get());
+  ]) {
+    phyTopics.push((await db.insert(topics).values({ subjectId: physics.id, name }).returning())[0]);
+  }
 
   // Topics for Chemistry
-  const chemTopics = [
+  const chemTopics = [];
+  for (const name of [
     "Atomic Structure", "Chemical Bonding", "Stoichiometry",
     "States of Matter", "Acids, Bases and Salts", "Organic Chemistry",
     "Electrochemistry", "Periodic Table"
-  ].map(name => db.insert(topics).values({ subjectId: chemistry.id, name }).returning().get());
+  ]) {
+    chemTopics.push((await db.insert(topics).values({ subjectId: chemistry.id, name }).returning())[0]);
+  }
 
   const years = [2018, 2019, 2020, 2021, 2022, 2023, 2024];
   const bodies = [waec, neco, jamb];
@@ -200,7 +212,7 @@ export function seedDatabase() {
       for (const year of years) {
         for (let i = 0; i < questionsArr.length; i++) {
           const q = questionsArr[i];
-          db.insert(questions).values({
+          await db.insert(questions).values({
             examBodyId: body.id,
             subjectId,
             topicId: topicsList[q.topic]?.id ?? null,
@@ -215,7 +227,7 @@ export function seedDatabase() {
             explanation: q.explanation,
             difficulty: q.diff,
             textbookRef: JSON.stringify([q.ref]),
-          }).run();
+          });
         }
       }
     }
@@ -250,16 +262,16 @@ export function seedDatabase() {
   ];
 
   for (const tip of mathStudyTipData) {
-    db.insert(studyTips).values({ subjectId: maths.id, topicId: tip.topicId, title: tip.title, content: tip.content }).run();
+    await db.insert(studyTips).values({ subjectId: maths.id, topicId: tip.topicId, title: tip.title, content: tip.content });
   }
   for (const tip of engStudyTipData) {
-    db.insert(studyTips).values({ subjectId: english.id, topicId: tip.topicId, title: tip.title, content: tip.content }).run();
+    await db.insert(studyTips).values({ subjectId: english.id, topicId: tip.topicId, title: tip.title, content: tip.content });
   }
   for (const tip of phyStudyTipData) {
-    db.insert(studyTips).values({ subjectId: physics.id, topicId: tip.topicId, title: tip.title, content: tip.content }).run();
+    await db.insert(studyTips).values({ subjectId: physics.id, topicId: tip.topicId, title: tip.title, content: tip.content });
   }
   for (const tip of chemStudyTipData) {
-    db.insert(studyTips).values({ subjectId: chemistry.id, topicId: tip.topicId, title: tip.title, content: tip.content }).run();
+    await db.insert(studyTips).values({ subjectId: chemistry.id, topicId: tip.topicId, title: tip.title, content: tip.content });
   }
 
   console.log("Database seeded successfully!");
