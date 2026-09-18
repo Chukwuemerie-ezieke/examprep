@@ -79,7 +79,7 @@ export interface IStorage {
   getCompletedQuizSessions(userId: number): Promise<QuizSession[]>;
   // Per-answered-question join rows for a user's completed sessions, used for
   // weak-topic analytics: { topicId, isCorrect }.
-  getTopicAnswerRows(userId: number): Promise<{ topicId: number | null; isCorrect: boolean }[]>;
+  getTopicAnswerRows(userId: number): Promise<{ topicId: number | null; topicName: string | null; isCorrect: boolean }[]>;
   getQuizSession(id: number): Promise<QuizSession | undefined>;
   createQuizSession(session: InsertQuizSession & { userId?: number | null }): Promise<QuizSession>;
   updateQuizSession(id: number, updates: Partial<QuizSession>): Promise<QuizSession | undefined>;
@@ -290,8 +290,10 @@ export class DatabaseStorage implements IStorage {
   // questionId, fetch those questions in a SINGLE bulk query via inArray (no
   // N+1), then compute isCorrect in JS by comparing the selected answer to the
   // question's correctAnswer. topicId comes straight from the question row (may
-  // be null). Scoped entirely to userId.
-  async getTopicAnswerRows(userId: number): Promise<{ topicId: number | null; isCorrect: boolean }[]> {
+  // be null), and the human-readable topicName is resolved via a LEFT join to
+  // the topics table (null when the question has no topic or the topic is
+  // unresolved). Scoped entirely to userId.
+  async getTopicAnswerRows(userId: number): Promise<{ topicId: number | null; topicName: string | null; isCorrect: boolean }[]> {
     const sessions = await this.getCompletedQuizSessions(userId);
 
     // Collect (questionId -> selectedAnswer) occurrences across all sessions.
@@ -314,18 +316,28 @@ export class DatabaseStorage implements IStorage {
 
     const uniqueIds = Array.from(new Set(answered.map((a) => a.questionId)));
     const rows = await db
-      .select({ id: questions.id, topicId: questions.topicId, correctAnswer: questions.correctAnswer })
+      .select({
+        id: questions.id,
+        topicId: questions.topicId,
+        topicName: topics.name,
+        correctAnswer: questions.correctAnswer,
+      })
       .from(questions)
+      .leftJoin(topics, eq(questions.topicId, topics.id))
       .where(inArray(questions.id, uniqueIds));
     const byId = new Map(rows.map((r) => [r.id, r]));
 
     // Only include answers whose question resolved (so topicId/correctAnswer are
     // known). Unknown ids are omitted from weak-topic stats.
-    const result: { topicId: number | null; isCorrect: boolean }[] = [];
+    const result: { topicId: number | null; topicName: string | null; isCorrect: boolean }[] = [];
     for (const a of answered) {
       const q = byId.get(a.questionId);
       if (!q) continue;
-      result.push({ topicId: q.topicId, isCorrect: a.selectedAnswer === q.correctAnswer });
+      result.push({
+        topicId: q.topicId,
+        topicName: q.topicName ?? null,
+        isCorrect: a.selectedAnswer === q.correctAnswer,
+      });
     }
     return result;
   }

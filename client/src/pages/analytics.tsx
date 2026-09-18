@@ -93,7 +93,7 @@ export default function Analytics() {
 
   const topicData =
     analytics?.weakTopics.map((w) => ({
-      label: `Topic ${w.topicId}`,
+      label: w.topicName || `Topic ${w.topicId}`,
       accuracy: w.accuracy,
       attempts: w.attempts,
     })) ?? [];

@@ -150,8 +150,8 @@ describe("computeAnalytics", () => {
     ];
     const a = computeAnalytics([makeSession({ id: 1 })], rows);
     expect(a.weakTopics.map((t) => t.topicId)).toEqual([1, 3, 2]);
-    expect(a.weakTopics[0]).toEqual({ topicId: 1, attempts: 3, correct: 1, accuracy: 33 });
-    expect(a.weakTopics[2]).toEqual({ topicId: 2, attempts: 2, correct: 2, accuracy: 100 });
+    expect(a.weakTopics[0]).toEqual({ topicId: 1, topicName: null, attempts: 3, correct: 1, accuracy: 33 });
+    expect(a.weakTopics[2]).toEqual({ topicId: 2, topicName: null, attempts: 2, correct: 2, accuracy: 100 });
   });
 
   it("tie-breaks equal accuracy by descending attempts", () => {
@@ -174,8 +174,64 @@ describe("computeAnalytics", () => {
 
   it("limits weak topics to at most 5", () => {
     const rows: TopicAnswerRow[] = [];
-    for (let t = 1; t <= 8; t++) rows.push({ topicId: t, isCorrect: false });
+    for (let t = 1; t <= 8; t++) {
+      // Give each topic >= the min-attempts floor so all 8 qualify and the cap
+      // (not the floor fallback) is what limits the result to 5.
+      for (let i = 0; i < 3; i++) rows.push({ topicId: t, isCorrect: false });
+    }
     const a = computeAnalytics([makeSession({ id: 1 })], rows);
     expect(a.weakTopics.length).toBe(5);
+  });
+
+  it("does not let a low-attempt 0% topic outrank a higher-attempt topic (attempts floor)", () => {
+    const rows: TopicAnswerRow[] = [];
+    // Five qualifying topics (>= 3 attempts) with moderate accuracy fill the
+    // display limit, so the below-floor 0%/1-attempt noise topic is excluded.
+    // topic 1: 2/5 = 40%
+    for (let i = 0; i < 2; i++) rows.push({ topicId: 1, isCorrect: true });
+    for (let i = 0; i < 3; i++) rows.push({ topicId: 1, isCorrect: false });
+    // topics 2..5: 3/4 = 75% each
+    for (let t = 2; t <= 5; t++) {
+      for (let i = 0; i < 3; i++) rows.push({ topicId: t, isCorrect: true });
+      rows.push({ topicId: t, isCorrect: false });
+    }
+    // topic 99: 0/1 = 0% but below the attempts floor -> must not appear.
+    rows.push({ topicId: 99, isCorrect: false });
+
+    const a = computeAnalytics([makeSession({ id: 1 })], rows);
+    expect(a.weakTopics.length).toBe(5);
+    expect(a.weakTopics.map((t) => t.topicId)).not.toContain(99);
+    // The weakest qualifying topic (40%) ranks first.
+    expect(a.weakTopics[0].topicId).toBe(1);
+  });
+
+  it("still returns below-floor topics for a light user (fallback)", () => {
+    // Only two topics, each with a single answered question (below the floor).
+    // With no qualifying topics, the fallback still surfaces them.
+    const rows: TopicAnswerRow[] = [
+      { topicId: 1, isCorrect: false }, // 0%
+      { topicId: 2, isCorrect: true }, // 100%
+    ];
+    const a = computeAnalytics([makeSession({ id: 1 })], rows);
+    expect(a.weakTopics.map((t) => t.topicId)).toEqual([1, 2]);
+    expect(a.weakTopics[0]).toMatchObject({ topicId: 1, attempts: 1, accuracy: 0 });
+  });
+
+  it("passes topicName through when provided and falls back to null otherwise", () => {
+    const rows: TopicAnswerRow[] = [
+      // topic 1 has a name on at least one row (first non-null wins).
+      { topicId: 1, isCorrect: false },
+      { topicId: 1, topicName: "Algebra", isCorrect: true },
+      { topicId: 1, isCorrect: false },
+      // topic 2 has no name anywhere -> null.
+      { topicId: 2, isCorrect: false },
+      { topicId: 2, isCorrect: false },
+      { topicId: 2, isCorrect: false },
+    ];
+    const a = computeAnalytics([makeSession({ id: 1 })], rows);
+    const t1 = a.weakTopics.find((t) => t.topicId === 1)!;
+    const t2 = a.weakTopics.find((t) => t.topicId === 2)!;
+    expect(t1.topicName).toBe("Algebra");
+    expect(t2.topicName).toBeNull();
   });
 });

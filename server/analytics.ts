@@ -9,8 +9,12 @@ import type { QuizSession } from "@shared/schema";
 // route derives these by parsing each completed session's answersJson and
 // joining each questionId to questions.topicId / questions.correctAnswer, then
 // comparing the selected answer to the correct answer to produce isCorrect.
+// topicName is the resolved human-readable name for topicId (joined server-side
+// from the topics table); it may be null when the topic has no name or the row
+// has no topic.
 export interface TopicAnswerRow {
   topicId: number | null;
+  topicName?: string | null;
   isCorrect: boolean;
 }
 
@@ -48,6 +52,7 @@ export interface OverallStats {
 
 export interface WeakTopic {
   topicId: number;
+  topicName: string | null; // resolved server-side; null -> client falls back to `Topic {id}`
   attempts: number;
   correct: number;
   accuracy: number; // round(correct/attempts*100)
@@ -63,6 +68,12 @@ export interface Analytics {
 
 // Max number of weak topics returned.
 const WEAK_TOPIC_LIMIT = 5;
+
+// Minimum answered attempts a topic needs to be treated as a reliable weak-topic
+// signal. Topics below this floor are de-prioritized (see the weakTopics ranking
+// rule below) so a single wrong answer cannot dominate the "study these next"
+// surface.
+const WEAK_TOPIC_MIN_ATTEMPTS = 3;
 
 function pct(correct: number, total: number): number {
   return total > 0 ? Math.round((correct / total) * 100) : 0;
@@ -166,6 +177,12 @@ export function computeAnalytics(
       subjectId: s.subjectId,
     }));
 
+  // METRIC DEFINITION (intentional, documented not changed): perSubject and
+  // perExamBody `avgScore` is an UNWEIGHTED mean of each session's percentage
+  // (every session counts equally regardless of how many questions it had),
+  // whereas overall.overallAccuracy below is QUESTION-WEIGHTED (total correct /
+  // total questions across all sessions). The two can therefore differ for a
+  // user whose sessions vary in length; both are surfaced as "%".
   const perSubject = groupBy(completedSessions, (s) => s.subjectId, "subjectId");
   const perExamBody = groupBy(completedSessions, (s) => s.examBodyId, "examBodyId");
 
@@ -190,26 +207,55 @@ export function computeAnalytics(
   };
 
   // Weak topics: aggregate the per-answered-question join rows by topicId,
-  // ignoring rows without a topic (topicId === null). Sorted ascending by
-  // accuracy, then descending by attempts as a tie-break, limited to a small N.
-  // When no per-topic data is available this is simply an empty array.
-  const topicMap = new Map<number, { attempts: number; correct: number }>();
+  // ignoring rows without a topic (topicId === null).
+  //
+  // METRIC DEFINITION (intentional, documented not changed): weak-topic
+  // `accuracy` is measured over ANSWERED questions only. answersJson stores only
+  // the selections the user actually made, so skipped questions are not
+  // attributed to any topic here. This differs from session/overall/trend
+  // scores, which treat skipped questions as incorrect (question-weighted). A
+  // topic's `attempts` is therefore the count of questions the user answered in
+  // that topic, not the count served.
+  //
+  // RANKING RULE (minimum-attempts floor with light-user fallback): topics with
+  // at least WEAK_TOPIC_MIN_ATTEMPTS answered questions are ranked FIRST
+  // (ascending accuracy, then descending attempts as a tie-break) so a single
+  // 0%/1-attempt topic cannot outrank a 40%/20-attempt topic. If fewer than
+  // WEAK_TOPIC_LIMIT qualifying topics exist, below-floor topics are appended
+  // (same ordering) until the limit is reached, so a brand-new/light user still
+  // sees weak topics instead of an empty list. topicName is carried through from
+  // the input rows (first non-null wins) and is null when unresolved.
+  const topicMap = new Map<number, { attempts: number; correct: number; name: string | null }>();
   for (const row of topicAnswers) {
     if (row.topicId === null) continue;
-    const entry = topicMap.get(row.topicId) ?? { attempts: 0, correct: 0 };
+    const entry = topicMap.get(row.topicId) ?? { attempts: 0, correct: 0, name: null };
     entry.attempts += 1;
     if (row.isCorrect) entry.correct += 1;
+    if (entry.name === null && row.topicName != null) entry.name = row.topicName;
     topicMap.set(row.topicId, entry);
   }
-  const weakTopics: WeakTopic[] = Array.from(topicMap.entries())
-    .map(([topicId, e]) => ({
-      topicId,
-      attempts: e.attempts,
-      correct: e.correct,
-      accuracy: pct(e.correct, e.attempts),
-    }))
-    .sort((a, b) => a.accuracy - b.accuracy || b.attempts - a.attempts)
-    .slice(0, WEAK_TOPIC_LIMIT);
+
+  const byAccuracyThenAttempts = (a: WeakTopic, b: WeakTopic) =>
+    a.accuracy - b.accuracy || b.attempts - a.attempts;
+
+  const allTopics: WeakTopic[] = Array.from(topicMap.entries()).map(([topicId, e]) => ({
+    topicId,
+    topicName: e.name,
+    attempts: e.attempts,
+    correct: e.correct,
+    accuracy: pct(e.correct, e.attempts),
+  }));
+
+  const qualifying = allTopics
+    .filter((t) => t.attempts >= WEAK_TOPIC_MIN_ATTEMPTS)
+    .sort(byAccuracyThenAttempts);
+  const belowFloor = allTopics
+    .filter((t) => t.attempts < WEAK_TOPIC_MIN_ATTEMPTS)
+    .sort(byAccuracyThenAttempts);
+
+  // Qualifying topics first; only fall back to below-floor topics to fill up to
+  // the display limit for light users.
+  const weakTopics: WeakTopic[] = [...qualifying, ...belowFloor].slice(0, WEAK_TOPIC_LIMIT);
 
   return { trend, perSubject, perExamBody, overall, weakTopics };
 }

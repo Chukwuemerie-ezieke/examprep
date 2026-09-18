@@ -132,6 +132,7 @@ export interface OverallStats {
 
 export interface WeakTopic {
   topicId: number;
+  topicName: string | null;
   attempts: number;
   correct: number;
   accuracy: number;
