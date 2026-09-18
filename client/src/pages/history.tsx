@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Trophy, BarChart3 } from "lucide-react";
+import { Clock, Trophy, BarChart3, LineChart } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import type { QuizSession, ExamBody, Subject } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
@@ -28,7 +28,17 @@ export default function History() {
 
   return (
     <div className="min-h-screen bg-background">
-      <PageHeader title="Quiz History" maxWidth="max-w-3xl" />
+      <PageHeader
+        title="Quiz History"
+        maxWidth="max-w-3xl"
+        action={
+          <Link href="/analytics">
+            <Button variant="ghost" size="sm" className="gap-1 text-xs" data-testid="link-analytics">
+              <LineChart className="w-3 h-3" /> Analytics
+            </Button>
+          </Link>
+        }
+      />
 
       <div className="max-w-3xl mx-auto px-4 py-6">
         {user && (
