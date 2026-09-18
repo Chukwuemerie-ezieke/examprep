@@ -62,7 +62,7 @@ app.use((req, res, next) => {
 
 (async () => {
   // Seed database with initial data
-  seedDatabase();
+  await seedDatabase();
 
   await registerRoutes(httpServer, app);
 
