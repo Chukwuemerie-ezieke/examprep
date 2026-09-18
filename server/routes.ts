@@ -17,6 +17,7 @@ import {
   loginSchema,
 } from "@shared/schema";
 import { hashPassword } from "./auth";
+import { gradeSubmission } from "./grading";
 
 // Strip answer-revealing fields (correctAnswer, explanation, textbookRef) from a
 // question so it is safe to send to the client during an active CBT quiz.
@@ -321,89 +322,26 @@ export async function registerRoutes(
     const data = validateBody(gradeSubmissionSchema, req, res);
     if (!data) return;
 
-    const { questionIds: submittedIds, answers, timeSpentSeconds } = data;
+    const { questionIds, answers, timeSpentSeconds } = data;
 
     // Grade against the FULL served question set, not just the answered ones.
-    // The client sends `questionIds` (every question shown in the quiz); we fall
-    // back to the answered ids only for older clients that omit the field.
-    // Deduplicate while preserving order.
-    const rawIds =
-      submittedIds && submittedIds.length > 0
-        ? submittedIds
-        : Object.keys(answers)
-            .map((k) => parseInt(k, 10))
-            .filter((n) => !Number.isNaN(n));
-    const questionIds = Array.from(new Set(rawIds));
-
-    let correct = 0;
-    const review: Array<{
-      questionId: number;
-      questionText: string;
-      options: { label: string; value: string }[];
-      yourAnswer: string | null;
-      correctAnswer: string;
-      isCorrect: boolean;
-      explanation: string;
-    }> = [];
-
-    // Number of questions that count toward the score. A question id that the
-    // store can't resolve (deleted/stale/fabricated) is treated as incorrect
-    // rather than dropped, so it never shrinks the denominator: a submission of
-    // N served questions is always graded out of N.
-    let total = 0;
-
-    for (const qId of questionIds) {
-      total++;
-      const q = await storage.getQuestion(qId);
-      const yourAnswer = answers[String(qId)] ?? null;
-      if (!q) {
-        // Unknown question id: cannot verify, count as incorrect and surface it
-        // in the review so the discrepancy is visible rather than silent.
-        review.push({
-          questionId: qId,
-          questionText: "Question unavailable",
-          options: [],
-          yourAnswer,
-          correctAnswer: "",
-          isCorrect: false,
-          explanation: "This question could not be found.",
-        });
-        continue;
-      }
-      const isCorrect = yourAnswer === q.correctAnswer;
-      if (isCorrect) correct++;
-      const options = [
-        { label: "A", value: q.optionA },
-        { label: "B", value: q.optionB },
-        { label: "C", value: q.optionC },
-        { label: "D", value: q.optionD },
-        ...(q.optionE ? [{ label: "E", value: q.optionE }] : []),
-      ];
-      review.push({
-        questionId: q.id,
-        questionText: q.questionText,
-        options,
-        yourAnswer,
-        correctAnswer: q.correctAnswer,
-        isCorrect,
-        explanation: q.explanation,
-      });
-    }
-
-    const percentage = total > 0 ? Math.round((correct / total) * 100) : 0;
+    // The pure grader falls back to the answered ids for older clients, dedupes
+    // while preserving order, counts skipped/unknown ids as incorrect within the
+    // denominator, and reveals correctAnswer/explanation only in the review.
+    const { score, review } = await gradeSubmission(
+      { questionIds, answers },
+      (qId) => storage.getQuestion(qId),
+    );
 
     await storage.updateQuizSession(id, {
       answeredQuestions: Object.keys(answers).length,
-      correctAnswers: correct,
+      correctAnswers: score.correct,
       timeSpentSeconds: timeSpentSeconds ?? session.timeSpentSeconds,
       status: "completed",
       answersJson: JSON.stringify(answers),
     });
 
-    res.json({
-      score: { correct, total, percentage },
-      review,
-    });
+    res.json({ score, review });
   });
 
   // ============ ADMIN ROUTES (password protected) ============
