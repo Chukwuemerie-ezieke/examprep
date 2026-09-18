@@ -113,6 +113,9 @@ export default function CBT() {
       // Grade server-side: the server computes the score against the stored
       // correct answers and returns the review with answers/explanations.
       const res = await apiRequest("POST", `/api/quiz-sessions/${sessionId}/submit`, {
+        // Send every served question id (answered or not) so grading and the
+        // review cover the full quiz; skipped questions score as incorrect.
+        questionIds: questions.map((q) => q.id),
         answers,
         timeSpentSeconds: totalTime,
       });
@@ -305,9 +308,16 @@ export default function CBT() {
                             Your answer: {item.yourAnswer} — {yourOption?.value}
                           </p>
                         )}
-                        <p className="text-xs text-green-600 dark:text-green-400 mb-1">
-                          Correct: {item.correctAnswer} — {correctOption?.value}
-                        </p>
+                        {!isCorrect && !item.yourAnswer && item.correctAnswer && (
+                          <p className="text-xs text-red-600 dark:text-red-400 mb-0.5">
+                            Not answered
+                          </p>
+                        )}
+                        {item.correctAnswer && (
+                          <p className="text-xs text-green-600 dark:text-green-400 mb-1">
+                            Correct: {item.correctAnswer} — {correctOption?.value}
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground">{item.explanation}</p>
                       </div>
                     </div>

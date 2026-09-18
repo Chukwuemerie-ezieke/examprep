@@ -21,8 +21,24 @@ function sanitizeQuestionForCbt(q: Question) {
   return safe;
 }
 
-// Body schema for server-side CBT grading.
+// Upper bound on how many questions any list endpoint / grader will return or
+// process in one request. Guards against an unbounded client `limit`.
+const MAX_QUESTION_LIMIT = 200;
+
+// Clamp a requested limit to a sane range. Falls back to `fallback` when the
+// value is missing or not a positive integer.
+function clampLimit(raw: string | undefined, fallback: number): number {
+  const n = raw ? parseInt(raw, 10) : fallback;
+  if (Number.isNaN(n) || n <= 0) return fallback;
+  return Math.min(n, MAX_QUESTION_LIMIT);
+}
+
+// Body schema for server-side CBT grading. `questionIds` is the full ordered set
+// of questions that were served for the quiz (answered or not), so grading and
+// the review cover every question - skipped ones count as incorrect. `answers`
+// maps a question id (as a string key) to the selected option letter.
 const gradeSubmissionSchema = z.object({
+  questionIds: z.array(z.number().int().positive()).max(MAX_QUESTION_LIMIT).optional(),
   answers: z.record(z.string(), z.string()),
   timeSpentSeconds: z.number().int().nonnegative().optional(),
 });
@@ -122,7 +138,7 @@ export async function registerRoutes(
       topicId: req.query.topicId ? parseInt(req.query.topicId as string) : undefined,
       year: req.query.year ? parseInt(req.query.year as string) : undefined,
       difficulty: req.query.difficulty as string | undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+      limit: clampLimit(req.query.limit as string | undefined, 50),
       offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
     };
     const qs = await storage.getQuestions(filters);
@@ -140,7 +156,7 @@ export async function registerRoutes(
       topicId: req.query.topicId ? parseInt(req.query.topicId as string) : undefined,
       year: req.query.year ? parseInt(req.query.year as string) : undefined,
       difficulty: req.query.difficulty as string | undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+      limit: clampLimit(req.query.limit as string | undefined, 50),
       offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
     };
     const qs = await storage.getQuestions(filters);
@@ -221,10 +237,19 @@ export async function registerRoutes(
     const data = validateBody(gradeSubmissionSchema, req, res);
     if (!data) return;
 
-    const { answers, timeSpentSeconds } = data;
-    const questionIds = Object.keys(answers)
-      .map((k) => parseInt(k, 10))
-      .filter((n) => !Number.isNaN(n));
+    const { questionIds: submittedIds, answers, timeSpentSeconds } = data;
+
+    // Grade against the FULL served question set, not just the answered ones.
+    // The client sends `questionIds` (every question shown in the quiz); we fall
+    // back to the answered ids only for older clients that omit the field.
+    // Deduplicate while preserving order.
+    const rawIds =
+      submittedIds && submittedIds.length > 0
+        ? submittedIds
+        : Object.keys(answers)
+            .map((k) => parseInt(k, 10))
+            .filter((n) => !Number.isNaN(n));
+    const questionIds = Array.from(new Set(rawIds));
 
     let correct = 0;
     const review: Array<{
@@ -237,10 +262,30 @@ export async function registerRoutes(
       explanation: string;
     }> = [];
 
+    // Number of questions that count toward the score. A question id that the
+    // store can't resolve (deleted/stale/fabricated) is treated as incorrect
+    // rather than dropped, so it never shrinks the denominator: a submission of
+    // N served questions is always graded out of N.
+    let total = 0;
+
     for (const qId of questionIds) {
+      total++;
       const q = await storage.getQuestion(qId);
-      if (!q) continue;
       const yourAnswer = answers[String(qId)] ?? null;
+      if (!q) {
+        // Unknown question id: cannot verify, count as incorrect and surface it
+        // in the review so the discrepancy is visible rather than silent.
+        review.push({
+          questionId: qId,
+          questionText: "Question unavailable",
+          options: [],
+          yourAnswer,
+          correctAnswer: "",
+          isCorrect: false,
+          explanation: "This question could not be found.",
+        });
+        continue;
+      }
       const isCorrect = yourAnswer === q.correctAnswer;
       if (isCorrect) correct++;
       const options = [
@@ -261,7 +306,6 @@ export async function registerRoutes(
       });
     }
 
-    const total = questionIds.length;
     const percentage = total > 0 ? Math.round((correct / total) * 100) : 0;
 
     await storage.updateQuizSession(id, {
