@@ -9,7 +9,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is required");
@@ -76,6 +76,10 @@ export interface IStorage {
 
   // Quiz sessions
   getQuizSessions(userId?: number): Promise<QuizSession[]>;
+  getCompletedQuizSessions(userId: number): Promise<QuizSession[]>;
+  // Per-answered-question join rows for a user's completed sessions, used for
+  // weak-topic analytics: { topicId, isCorrect }.
+  getTopicAnswerRows(userId: number): Promise<{ topicId: number | null; topicName: string | null; isCorrect: boolean }[]>;
   getQuizSession(id: number): Promise<QuizSession | undefined>;
   createQuizSession(session: InsertQuizSession & { userId?: number | null }): Promise<QuizSession>;
   updateQuizSession(id: number, updates: Partial<QuizSession>): Promise<QuizSession | undefined>;
@@ -269,6 +273,73 @@ export class DatabaseStorage implements IStorage {
       return db.select().from(quizSessions).where(eq(quizSessions.userId, userId));
     }
     return db.select().from(quizSessions);
+  }
+
+  // Completed sessions for a single user, scoped by userId so no other user's
+  // data is ever read.
+  async getCompletedQuizSessions(userId: number): Promise<QuizSession[]> {
+    return db
+      .select()
+      .from(quizSessions)
+      .where(and(eq(quizSessions.userId, userId), eq(quizSessions.status, "completed")));
+  }
+
+  // Build the per-answered-question join rows needed for weak-topic analytics.
+  // Approach: load the user's completed sessions, parse each session's
+  // answersJson ({ questionId: selectedAnswer }), collect every answered
+  // questionId, fetch those questions in a SINGLE bulk query via inArray (no
+  // N+1), then compute isCorrect in JS by comparing the selected answer to the
+  // question's correctAnswer. topicId comes straight from the question row (may
+  // be null), and the human-readable topicName is resolved via a LEFT join to
+  // the topics table (null when the question has no topic or the topic is
+  // unresolved). Scoped entirely to userId.
+  async getTopicAnswerRows(userId: number): Promise<{ topicId: number | null; topicName: string | null; isCorrect: boolean }[]> {
+    const sessions = await this.getCompletedQuizSessions(userId);
+
+    // Collect (questionId -> selectedAnswer) occurrences across all sessions.
+    const answered: { questionId: number; selectedAnswer: string }[] = [];
+    for (const s of sessions) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(s.answersJson ?? "{}") as Record<string, unknown>;
+      } catch {
+        continue; // Skip malformed answersJson rather than failing the request.
+      }
+      for (const [key, val] of Object.entries(parsed)) {
+        const qId = parseInt(key, 10);
+        if (Number.isNaN(qId) || typeof val !== "string") continue;
+        answered.push({ questionId: qId, selectedAnswer: val });
+      }
+    }
+
+    if (answered.length === 0) return [];
+
+    const uniqueIds = Array.from(new Set(answered.map((a) => a.questionId)));
+    const rows = await db
+      .select({
+        id: questions.id,
+        topicId: questions.topicId,
+        topicName: topics.name,
+        correctAnswer: questions.correctAnswer,
+      })
+      .from(questions)
+      .leftJoin(topics, eq(questions.topicId, topics.id))
+      .where(inArray(questions.id, uniqueIds));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    // Only include answers whose question resolved (so topicId/correctAnswer are
+    // known). Unknown ids are omitted from weak-topic stats.
+    const result: { topicId: number | null; topicName: string | null; isCorrect: boolean }[] = [];
+    for (const a of answered) {
+      const q = byId.get(a.questionId);
+      if (!q) continue;
+      result.push({
+        topicId: q.topicId,
+        topicName: q.topicName ?? null,
+        isCorrect: a.selectedAnswer === q.correctAnswer,
+      });
+    }
+    return result;
   }
 
   async getQuizSession(id: number): Promise<QuizSession | undefined> {

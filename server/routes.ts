@@ -18,6 +18,7 @@ import {
 } from "@shared/schema";
 import { hashPassword } from "./auth";
 import { gradeSubmission } from "./grading";
+import { computeAnalytics } from "./analytics";
 
 // Strip answer-revealing fields (correctAnswer, explanation, textbookRef) from a
 // question so it is safe to send to the client during an active CBT quiz.
@@ -541,6 +542,20 @@ export async function registerRoutes(
       completedSessions: completedSessions.length,
       averageScore: avgScore,
     });
+  });
+
+  // Per-user analytics. Read-only, requires auth (401 when unauthenticated).
+  // Every query is scoped to the authenticated user's id, so no other user's
+  // data is ever read. Returns an empty-safe payload (200, zeros/empty arrays)
+  // for a user with no completed sessions. Shape mirrors the Analytics type in
+  // server/analytics.ts: { trend, perSubject, perExamBody, overall, weakTopics }.
+  app.get("/api/analytics", requireAuth, async (req, res) => {
+    const userId = (req.user as User).id;
+    const [completedSessions, topicAnswers] = await Promise.all([
+      storage.getCompletedQuizSessions(userId),
+      storage.getTopicAnswerRows(userId),
+    ]);
+    res.json(computeAnalytics(completedSessions, topicAnswers));
   });
 
   return httpServer;

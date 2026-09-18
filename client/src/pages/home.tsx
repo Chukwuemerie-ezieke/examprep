@@ -8,7 +8,7 @@ import {
   BookOpen, GraduationCap, Trophy, Clock, Calculator,
   Atom, FlaskConical, ArrowRight, Target, Lightbulb
 } from "lucide-react";
-import { LogIn, LogOut, User as UserIcon, History as HistoryIcon } from "lucide-react";
+import { LogIn, LogOut, User as UserIcon, History as HistoryIcon, LineChart } from "lucide-react";
 import type { Stats, ExamBody, Subject } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { Logo } from "@/components/Logo";
@@ -48,6 +48,11 @@ export default function Home() {
               <Link href="/history">
                 <Button variant="ghost" size="sm" className="gap-1 text-xs" data-testid="link-history">
                   <HistoryIcon className="w-3 h-3" /> History
+                </Button>
+              </Link>
+              <Link href="/analytics">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs" data-testid="link-analytics">
+                  <LineChart className="w-3 h-3" /> Analytics
                 </Button>
               </Link>
               {user.isAdmin && (

@@ -11,6 +11,7 @@ import Practice from "@/pages/practice";
 import CBT from "@/pages/cbt";
 import StudyTips from "@/pages/study-tips";
 import History from "@/pages/history";
+import Analytics from "@/pages/analytics";
 import Admin from "@/pages/admin";
 import Auth from "@/pages/auth";
 
@@ -60,6 +61,9 @@ function AppRouter() {
       <Route path="/auth" component={Auth} />
       <Route path="/history">
         <ProtectedRoute component={History} />
+      </Route>
+      <Route path="/analytics">
+        <ProtectedRoute component={Analytics} />
       </Route>
       <Route path="/admin">
         <ProtectedRoute component={Admin} requireAdmin />

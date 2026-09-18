@@ -96,3 +96,52 @@ export interface Stats {
   completedSessions: number;
   averageScore: number;
 }
+
+// Analytics response types — mirror server/analytics.ts (GET /api/analytics) exactly.
+
+// One point on the score trend, one per completed session, sorted ascending by createdAt.
+export interface TrendPoint {
+  sessionId: number;
+  date: string; // ISO createdAt
+  percentage: number;
+  correctAnswers: number;
+  totalQuestions: number;
+  examBodyId: number;
+  subjectId: number;
+}
+
+// A per-subject or per-exam-body rollup.
+export interface GroupBreakdown {
+  subjectId?: number;
+  examBodyId?: number;
+  attempts: number;
+  avgScore: number;
+  totalCorrect: number;
+  totalQuestions: number;
+}
+
+export interface OverallStats {
+  completedSessions: number;
+  totalQuestions: number;
+  totalCorrect: number;
+  overallAccuracy: number;
+  totalStudyTimeSeconds: number;
+  currentStreakDays: number;
+  longestStreakDays: number;
+}
+
+export interface WeakTopic {
+  topicId: number;
+  topicName: string | null;
+  attempts: number;
+  correct: number;
+  accuracy: number;
+}
+
+export interface Analytics {
+  trend: TrendPoint[];
+  perSubject: GroupBreakdown[];
+  perExamBody: GroupBreakdown[];
+  overall: OverallStats;
+  weakTopics: WeakTopic[];
+}
