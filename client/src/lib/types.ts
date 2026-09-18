@@ -64,8 +64,17 @@ export interface StudyTip {
   content: string;
 }
 
+export interface User {
+  id: number;
+  email: string;
+  displayName: string | null;
+  isAdmin: boolean;
+  createdAt: string;
+}
+
 export interface QuizSession {
   id: number;
+  userId: number | null;
   examBodyId: number;
   subjectId: number;
   year: number | null;

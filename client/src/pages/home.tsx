@@ -8,10 +8,12 @@ import {
   BookOpen, GraduationCap, Trophy, Clock, Calculator,
   Atom, FlaskConical, ArrowRight, Target, Lightbulb
 } from "lucide-react";
+import { LogIn, LogOut, User as UserIcon, History as HistoryIcon } from "lucide-react";
 import type { Stats, ExamBody, Subject } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { Logo } from "@/components/Logo";
 import { InstallButton } from "@/components/InstallButton";
+import { useAuth } from "@/hooks/use-auth";
 
 const subjectIcons: Record<string, any> = {
   calculator: Calculator,
@@ -21,6 +23,7 @@ const subjectIcons: Record<string, any> = {
 };
 
 export default function Home() {
+  const { user, logoutMutation } = useAuth();
   const { data: stats, isLoading: statsLoading } = useQuery<Stats>({
     queryKey: ["/api/stats"],
   });
@@ -33,6 +36,48 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Auth bar */}
+      <div className="border-b border-border bg-card/50">
+        <div className="max-w-5xl mx-auto px-4 py-2 flex items-center justify-end gap-2">
+          {user ? (
+            <>
+              <span className="text-xs text-muted-foreground flex items-center gap-1 mr-1" data-testid="text-current-user">
+                <UserIcon className="w-3 h-3" />
+                {user.displayName || user.email}
+              </span>
+              <Link href="/history">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs" data-testid="link-history">
+                  <HistoryIcon className="w-3 h-3" /> History
+                </Button>
+              </Link>
+              {user.isAdmin && (
+                <Link href="/admin">
+                  <Button variant="ghost" size="sm" className="text-xs" data-testid="link-admin-top">
+                    Admin
+                  </Button>
+                </Link>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1 text-xs"
+                onClick={() => logoutMutation.mutate()}
+                disabled={logoutMutation.isPending}
+                data-testid="button-logout"
+              >
+                <LogOut className="w-3 h-3" /> Logout
+              </Button>
+            </>
+          ) : (
+            <Link href="/auth">
+              <Button variant="outline" size="sm" className="gap-1 text-xs" data-testid="link-auth">
+                <LogIn className="w-3 h-3" /> Sign in
+              </Button>
+            </Link>
+          )}
+        </div>
+      </div>
+
       {/* Hero */}
       <section className="relative overflow-hidden border-b border-border">
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/30" />
@@ -113,9 +158,13 @@ export default function Home() {
                 <CardContent className="p-4">
                   <div className="flex items-center gap-2 mb-1">
                     <Trophy className="w-4 h-4 text-primary" />
-                    <span className="text-lg font-bold text-foreground">{stats?.averageScore || 0}%</span>
+                    <span className="text-lg font-bold text-foreground">
+                      {user ? `${stats?.averageScore || 0}%` : "--"}
+                    </span>
                   </div>
-                  <p className="text-xs text-muted-foreground">Avg Score</p>
+                  <p className="text-xs text-muted-foreground">
+                    {user ? "Your Avg Score" : "Sign in for your score"}
+                  </p>
                 </CardContent>
               </Card>
             </>

@@ -7,8 +7,10 @@ import { Clock, Trophy, BarChart3 } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import type { QuizSession, ExamBody, Subject } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function History() {
+  const { user } = useAuth();
   const { data: sessions, isLoading } = useQuery<QuizSession[]>({ queryKey: ["/api/quiz-sessions"] });
   const { data: examBodies } = useQuery<ExamBody[]>({ queryKey: ["/api/exam-bodies"] });
   const { data: subjects } = useQuery<Subject[]>({ queryKey: ["/api/subjects"] });
@@ -29,6 +31,11 @@ export default function History() {
       <PageHeader title="Quiz History" maxWidth="max-w-3xl" />
 
       <div className="max-w-3xl mx-auto px-4 py-6">
+        {user && (
+          <p className="text-xs text-muted-foreground mb-4" data-testid="text-history-user">
+            Signed in as {user.displayName || user.email}
+          </p>
+        )}
         {completedSessions.length === 0 ? (
           <div className="text-center py-16">
             <BarChart3 className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
