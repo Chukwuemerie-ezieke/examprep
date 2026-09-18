@@ -1,9 +1,12 @@
-import { scrypt, randomBytes, timingSafeEqual } from "crypto";
-import { promisify } from "util";
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { storage } from "./storage";
 import type { User } from "@shared/schema";
+import { hashPassword, verifyPassword } from "./password";
+
+// Re-export the password hashing primitives so existing importers of
+// `./auth` (e.g. server/routes.ts) keep working unchanged.
+export { hashPassword, verifyPassword };
 
 // Make req.user carry our User shape across the app.
 type SchemaUser = User;
@@ -13,39 +16,6 @@ declare global {
     // eslint-disable-next-line @typescript-eslint/no-empty-interface
     interface User extends SchemaUser {}
   }
-}
-
-const scryptAsync = promisify(scrypt);
-
-// scrypt parameters. Keylen 64 bytes; default cost is fine for interactive auth.
-const KEYLEN = 64;
-const SALT_BYTES = 16;
-
-// Hash a plaintext password with a per-password random salt using Node's
-// built-in scrypt. Returns a self-describing string: `scrypt$<saltHex>$<hashHex>`.
-export async function hashPassword(plain: string): Promise<string> {
-  const salt = randomBytes(SALT_BYTES).toString("hex");
-  const derived = (await scryptAsync(plain, salt, KEYLEN)) as Buffer;
-  return `scrypt$${salt}$${derived.toString("hex")}`;
-}
-
-// Verify a plaintext password against a stored `scrypt$salt$hash` string.
-// Uses timingSafeEqual and guards against malformed input / length mismatch.
-export async function verifyPassword(plain: string, stored: string): Promise<boolean> {
-  if (typeof stored !== "string") return false;
-  const parts = stored.split("$");
-  if (parts.length !== 3 || parts[0] !== "scrypt") return false;
-  const [, salt, hashHex] = parts;
-  let expected: Buffer;
-  try {
-    expected = Buffer.from(hashHex, "hex");
-  } catch {
-    return false;
-  }
-  if (expected.length === 0) return false;
-  const derived = (await scryptAsync(plain, salt, expected.length)) as Buffer;
-  if (derived.length !== expected.length) return false;
-  return timingSafeEqual(derived, expected);
 }
 
 // Configure passport with a local (email + password) strategy and session
