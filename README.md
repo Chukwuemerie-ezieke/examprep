@@ -27,6 +27,41 @@ A question can also carry an **optional image URL** (`imageUrl`): an absolute
 the question in practice, CBT, and review. This is **paste-a-URL only** — there
 is no upload backend, so images are referenced by URL rather than stored.
 
+### Leaderboard
+
+A public **leaderboard** (`/leaderboard`, viewable while logged out) ranks
+players by their **average score** (the unweighted mean of their completed-quiz
+percentages, matching the analytics convention), with total questions answered
+as the tie-break. It can be filtered by exam body and subject, or viewed
+globally.
+
+Ranking is **strictly opt-in and privacy-preserving**:
+
+- Users appear in the public ranking only after turning on
+  `Show me on the leaderboard` (stored as `users.show_on_leaderboard`, a
+  boolean **NOT NULL DEFAULT false** applied by `npm run db:push`). Opt-in
+  defaults to **off**.
+- A player is ranked only once they have completed at least
+  `LEADERBOARD_MIN_SESSIONS` (**3**) quizzes matching the active filter.
+- The payload exposes **only** a rank, a display label, the average score, and
+  volume counts (completed quizzes / questions answered). It **never** exposes
+  email, the numeric user id as an identity, dates, or raw per-session data. A
+  player with no display name is shown as an anonymized `Student #<rank>`, so
+  opted-in users are nudged to set a display name.
+- Authenticated viewers additionally receive their own standing (`me`), computed
+  regardless of opt-in/threshold and returned only to that viewer (never leaked
+  to anyone else), so they can see their rank or a nudge explaining why they are
+  not ranked yet.
+
+Endpoints:
+
+- `GET /api/leaderboard?examBodyId=&subjectId=` — public read returning
+  `{ entries, me }`; `me` is populated only for authenticated callers and is
+  `null` for anonymous ones.
+- `PATCH /api/auth/me` (auth required) — updates `{ showOnLeaderboard?,
+  displayName? }` and returns the safe user. `GET /api/auth/me` now includes
+  `showOnLeaderboard` and `displayName`.
+
 ## Stack
 
 **Backend**
@@ -148,6 +183,9 @@ The current suite is pure and needs no database. It covers:
   schemas from `shared/schema.ts`.
 - **CBT grading** (`tests/grading.test.ts`): the pure grading function in
   `server/grading.ts`.
+- **Leaderboard ranking** (`tests/leaderboard.test.ts`): the pure leaderboard
+  ranking core in `server/leaderboard.ts` (average-score ordering, the
+  minimum-sessions threshold, tie-breaking, and self-standing).
 
 By convention, any database-gated integration tests run only when a real
 Postgres is reachable. To enable that subset, point `DATABASE_URL` at a
@@ -344,6 +382,7 @@ server/
   password.ts  scrypt hashPassword / verifyPassword helpers
   grading.ts   Pure CBT grading function used by the submit route
   analytics.ts Pure per-user analytics aggregation used by the analytics route
+  leaderboard.ts Pure leaderboard ranking/threshold/self-standing core used by the /api/leaderboard route
   ingest/      Pure, DB-free ingestion core: normalize.ts (normalizer + dedupe key),
                adapters.ts (dependency-free CSV parser + ALOC mapping), resolve.ts
                (DB-backed ResolutionContext factory: auto-create subjects/topics,
@@ -358,7 +397,7 @@ script/
   build.ts     Client + server build (Vite + esbuild) with a runtime dependency allowlist
   ingest.ts    Pluggable content-ingestion CLI (`npm run ingest`): file + ALOC adapters
   verify-auth.ts  In-process auth verification harness (not part of the test suite)
-tests/         Vitest suites: auth.test.ts, schema.test.ts, grading.test.ts
+tests/         Vitest suites: auth.test.ts, schema.test.ts, grading.test.ts, leaderboard.test.ts
 .github/workflows/ci.yml  GitHub Actions CI pipeline
 Dockerfile     Multi-stage production image
 ```

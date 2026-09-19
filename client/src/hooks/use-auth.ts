@@ -13,6 +13,12 @@ export interface LoginInput {
   password: string;
 }
 
+// Profile fields the authenticated user can update via PATCH /api/auth/me.
+export interface ProfileUpdateInput {
+  showOnLeaderboard?: boolean;
+  displayName?: string;
+}
+
 // Invalidate every query whose result depends on the current identity so the
 // UI re-fetches under the new auth state after login/signup/logout.
 function invalidateAuthScopedQueries() {
@@ -52,6 +58,21 @@ export function useAuth() {
     onSuccess: invalidateAuthScopedQueries,
   });
 
+  // Update the current user's profile (leaderboard opt-in + display name).
+  // On success we refresh the auth-scoped queries and the leaderboard, since a
+  // change to opt-in or display name affects both /api/auth/me and rankings.
+  const updateProfileMutation = useMutation({
+    mutationFn: async (input: ProfileUpdateInput) => {
+      const res = await apiRequest("PATCH", "/api/auth/me", input);
+      return (await res.json()) as User;
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["/api/auth/me"], updated);
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/leaderboard"] });
+    },
+  });
+
   const logoutMutation = useMutation({
     mutationFn: async () => {
       await apiRequest("POST", "/api/auth/logout");
@@ -69,5 +90,6 @@ export function useAuth() {
     loginMutation,
     signupMutation,
     logoutMutation,
+    updateProfileMutation,
   };
 }

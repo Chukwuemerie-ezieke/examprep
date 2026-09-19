@@ -10,6 +10,10 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name"),
   isAdmin: boolean("is_admin").notNull().default(false),
+  // Opt-in flag for appearing on the public leaderboard. Default OFF for
+  // privacy: a user is only ever listed after explicitly opting in. Additive
+  // and backward-compatible - db:push adds it to existing rows as false.
+  showOnLeaderboard: boolean("show_on_leaderboard").notNull().default(false),
   createdAt: text("created_at").notNull(),
 });
 
@@ -130,6 +134,16 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+// Profile-update payload validation for the authenticated `PATCH /api/auth/me`
+// route. Only user-editable fields are accepted: the leaderboard opt-in flag
+// and the display name (which may be cleared to null). Both are optional so a
+// caller can update either independently. Server-owned fields (email, isAdmin,
+// passwordHash) are never accepted here.
+export const profileUpdateSchema = z.object({
+  showOnLeaderboard: z.boolean().optional(),
+  displayName: z.string().trim().min(1).max(100).nullable().optional(),
+});
+
 // Types
 export type ExamBody = typeof examBodies.$inferSelect;
 export type InsertExamBody = z.infer<typeof insertExamBodySchema>;
@@ -147,3 +161,6 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+// `User` (typeof users.$inferSelect) auto-includes showOnLeaderboard now that
+// the column is declared on the users pgTable above.
+export type ProfileUpdateInput = z.infer<typeof profileUpdateSchema>;

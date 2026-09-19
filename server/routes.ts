@@ -15,10 +15,12 @@ import {
   insertTopicSchema,
   signupSchema,
   loginSchema,
+  profileUpdateSchema,
 } from "@shared/schema";
 import { hashPassword } from "./auth";
 import { gradeSubmission } from "./grading";
 import { computeAnalytics } from "./analytics";
+import { computeLeaderboard, LEADERBOARD_MIN_SESSIONS, LEADERBOARD_LIMIT } from "./leaderboard";
 import { normalizeQuestion, computeDedupeKey, type RawRecord } from "./ingest/normalize";
 import { parseCsv, csvRowToRaw } from "./ingest/adapters";
 import { createResolutionContext } from "./ingest/resolve";
@@ -190,12 +192,25 @@ export async function registerRoutes(
     });
   });
 
-  // Current authenticated user (safe shape) or 401 when not logged in.
+  // Current authenticated user (safe shape) or 401 when not logged in. The safe
+  // shape now includes showOnLeaderboard + displayName (both spread through
+  // safeUser, which only strips passwordHash).
   app.get("/api/auth/me", (req, res) => {
     if (req.isAuthenticated && req.isAuthenticated() && req.user) {
       return res.json(safeUser(req.user as User));
     }
     return res.status(401).json({ message: "Unauthorized" });
+  });
+
+  // Update the authenticated user's editable profile: leaderboard opt-in and/or
+  // display name. requireAuth (401 when unauthenticated); scoped to the caller's
+  // own id. Returns the updated safe user (no passwordHash).
+  app.patch("/api/auth/me", requireAuth, adminLimiter, async (req, res) => {
+    const data = validateBody(profileUpdateSchema, req, res);
+    if (!data) return;
+    const updated = await storage.updateUserProfile((req.user as User).id, data);
+    if (!updated) return res.status(404).json({ message: "User not found" });
+    res.json(safeUser(updated));
   });
 
   // ============ END AUTH ROUTES ============
@@ -645,6 +660,31 @@ export async function registerRoutes(
       storage.getTopicAnswerRows(userId),
     ]);
     res.json(computeAnalytics(completedSessions, topicAnswers));
+  });
+
+  // Public leaderboard read. Optional examBodyId/subjectId int filters narrow
+  // the ranking to sessions in that exam body / subject (NaN guarded to
+  // undefined, matching the /api/questions filter parsing). `entries` is the
+  // ranked, opted-in, threshold-passing top-N and never contains email or per-
+  // session data. `me` (the caller's own self-standing) is included ONLY for an
+  // authenticated caller, scoped to their own id; anonymous callers get
+  // me: null so a self-row is never leaked.
+  app.get("/api/leaderboard", async (req, res) => {
+    const examBodyIdRaw = req.query.examBodyId ? parseInt(req.query.examBodyId as string) : undefined;
+    const subjectIdRaw = req.query.subjectId ? parseInt(req.query.subjectId as string) : undefined;
+    const filter = {
+      examBodyId: examBodyIdRaw !== undefined && !Number.isNaN(examBodyIdRaw) ? examBodyIdRaw : undefined,
+      subjectId: subjectIdRaw !== undefined && !Number.isNaN(subjectIdRaw) ? subjectIdRaw : undefined,
+    };
+    const rows = await storage.getLeaderboardRows(filter);
+    const authed = !!(req.isAuthenticated && req.isAuthenticated() && req.user);
+    const result = computeLeaderboard(rows, {
+      minSessions: LEADERBOARD_MIN_SESSIONS,
+      limit: LEADERBOARD_LIMIT,
+      viewerUserId: authed ? (req.user as User).id : undefined,
+    });
+    // Defensive: never leak a self-row to anonymous callers.
+    res.json(authed ? result : { entries: result.entries, me: null });
   });
 
   return httpServer;

@@ -12,6 +12,7 @@ import CBT from "@/pages/cbt";
 import StudyTips from "@/pages/study-tips";
 import History from "@/pages/history";
 import Analytics from "@/pages/analytics";
+import Leaderboard from "@/pages/leaderboard";
 import Admin from "@/pages/admin";
 import Auth from "@/pages/auth";
 
@@ -58,6 +59,8 @@ function AppRouter() {
         <ProtectedRoute component={CBT} />
       </Route>
       <Route path="/study-tips" component={StudyTips} />
+      {/* Public: viewable logged out; the page gates its self-row/opt-in internally. */}
+      <Route path="/leaderboard" component={Leaderboard} />
       <Route path="/auth" component={Auth} />
       <Route path="/history">
         <ProtectedRoute component={History} />
