@@ -183,6 +183,9 @@ The current suite is pure and needs no database. It covers:
   schemas from `shared/schema.ts`.
 - **CBT grading** (`tests/grading.test.ts`): the pure grading function in
   `server/grading.ts`.
+- **Leaderboard ranking** (`tests/leaderboard.test.ts`): the pure leaderboard
+  ranking core in `server/leaderboard.ts` (average-score ordering, the
+  minimum-sessions threshold, tie-breaking, and self-standing).
 
 By convention, any database-gated integration tests run only when a real
 Postgres is reachable. To enable that subset, point `DATABASE_URL` at a
@@ -379,6 +382,7 @@ server/
   password.ts  scrypt hashPassword / verifyPassword helpers
   grading.ts   Pure CBT grading function used by the submit route
   analytics.ts Pure per-user analytics aggregation used by the analytics route
+  leaderboard.ts Pure leaderboard ranking/threshold/self-standing core used by the /api/leaderboard route
   ingest/      Pure, DB-free ingestion core: normalize.ts (normalizer + dedupe key),
                adapters.ts (dependency-free CSV parser + ALOC mapping), resolve.ts
                (DB-backed ResolutionContext factory: auto-create subjects/topics,
@@ -393,7 +397,7 @@ script/
   build.ts     Client + server build (Vite + esbuild) with a runtime dependency allowlist
   ingest.ts    Pluggable content-ingestion CLI (`npm run ingest`): file + ALOC adapters
   verify-auth.ts  In-process auth verification harness (not part of the test suite)
-tests/         Vitest suites: auth.test.ts, schema.test.ts, grading.test.ts
+tests/         Vitest suites: auth.test.ts, schema.test.ts, grading.test.ts, leaderboard.test.ts
 .github/workflows/ci.yml  GitHub Actions CI pipeline
 Dockerfile     Multi-stage production image
 ```
