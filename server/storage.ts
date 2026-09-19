@@ -9,8 +9,9 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, isNotNull } from "drizzle-orm";
 import { matchDuplicate } from "./ingest/normalize";
+import type { LeaderboardUserRow } from "./leaderboard";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is required");
@@ -83,6 +84,15 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserById(id: number): Promise<User | undefined>;
   createUser(data: { email: string; passwordHash: string; displayName?: string | null; isAdmin?: boolean }): Promise<User>;
+  // Update the user-editable profile fields (leaderboard opt-in + display name).
+  // An all-empty update is a no-op that returns the current user unchanged.
+  updateUserProfile(id: number, updates: { showOnLeaderboard?: boolean; displayName?: string | null }): Promise<User | undefined>;
+
+  // Per-user aggregated rows for leaderboard ranking, computed over COMPLETED
+  // sessions only, optionally filtered by examBodyId/subjectId. The ranking /
+  // threshold / tie-break / limit / self-standing logic lives in the pure
+  // server/leaderboard.ts core, NOT here.
+  getLeaderboardRows(filter: { examBodyId?: number; subjectId?: number }): Promise<LeaderboardUserRow[]>;
 
   // Quiz sessions
   getQuizSessions(userId?: number): Promise<QuizSession[]>;
@@ -303,6 +313,63 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return rows[0];
+  }
+
+  // Update the leaderboard opt-in flag and/or display name. Only the provided
+  // keys are written. An all-empty update short-circuits to the current user so
+  // we never issue a no-op UPDATE (and never accidentally clear columns).
+  async updateUserProfile(
+    id: number,
+    updates: { showOnLeaderboard?: boolean; displayName?: string | null },
+  ): Promise<User | undefined> {
+    const set: { showOnLeaderboard?: boolean; displayName?: string | null } = {};
+    if (updates.showOnLeaderboard !== undefined) set.showOnLeaderboard = updates.showOnLeaderboard;
+    if (updates.displayName !== undefined) set.displayName = updates.displayName;
+    if (Object.keys(set).length === 0) {
+      return this.getUserById(id);
+    }
+    const rows = await db.update(users).set(set).where(eq(users.id, id)).returning();
+    return rows[0];
+  }
+
+  // Aggregate per-user leaderboard rows over COMPLETED, user-owned sessions.
+  // Optional examBodyId/subjectId narrow the set of sessions that count toward a
+  // user's average and volume. avgScore is the UNWEIGHTED mean of per-session
+  // round(correct/total*100) to match the analytics convention; a session with
+  // zero totalQuestions contributes a 0 percentage (total-safe). Only users who
+  // have at least one matching completed session are returned.
+  async getLeaderboardRows(filter: { examBodyId?: number; subjectId?: number }): Promise<LeaderboardUserRow[]> {
+    const conditions = [eq(quizSessions.status, "completed"), isNotNull(quizSessions.userId)];
+    if (filter.examBodyId) conditions.push(eq(quizSessions.examBodyId, filter.examBodyId));
+    if (filter.subjectId) conditions.push(eq(quizSessions.subjectId, filter.subjectId));
+
+    const rows = await db
+      .select({
+        userId: users.id,
+        displayName: users.displayName,
+        showOnLeaderboard: users.showOnLeaderboard,
+        completedSessions: sql<number>`count(${quizSessions.id})`,
+        // Unweighted mean of per-session round(correct/total*100); total-safe.
+        avgScore: sql<number>`coalesce(round(avg(
+          case when ${quizSessions.totalQuestions} > 0
+            then round(${quizSessions.correctAnswers}::numeric / ${quizSessions.totalQuestions} * 100)
+            else 0 end
+        )), 0)`,
+        questionsAnswered: sql<number>`coalesce(sum(${quizSessions.answeredQuestions}), 0)`,
+      })
+      .from(users)
+      .innerJoin(quizSessions, eq(quizSessions.userId, users.id))
+      .where(and(...conditions))
+      .groupBy(users.id, users.displayName, users.showOnLeaderboard);
+
+    return rows.map((r) => ({
+      userId: Number(r.userId),
+      displayName: r.displayName,
+      showOnLeaderboard: r.showOnLeaderboard,
+      completedSessions: Number(r.completedSessions),
+      avgScore: Number(r.avgScore),
+      questionsAnswered: Number(r.questionsAnswered),
+    }));
   }
 
   async getQuizSessions(userId?: number): Promise<QuizSession[]> {
