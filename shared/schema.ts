@@ -90,7 +90,24 @@ export const quizSessions = pgTable("quiz_sessions", {
 export const insertExamBodySchema = createInsertSchema(examBodies).omit({ id: true });
 export const insertSubjectSchema = createInsertSchema(subjects).omit({ id: true });
 export const insertTopicSchema = createInsertSchema(topics).omit({ id: true });
-export const insertQuestionSchema = createInsertSchema(questions).omit({ id: true });
+// The base drizzle-zod schema only type-checks `imageUrl` as an optional
+// string. Refine it so every write path (admin CRUD + bulk) enforces the same
+// contract the ingestion pipeline already guarantees via sanitizeImageUrl:
+// a stored imageUrl is either absent/null or an absolute http(s) URL. This
+// rejects non-http(s) schemes (e.g. "javascript:alert(1)", "data:...") and
+// bare relative paths (e.g. "questions/a.png").
+export const insertQuestionSchema = createInsertSchema(questions)
+  .omit({ id: true })
+  .extend({
+    imageUrl: z
+      .string()
+      .url()
+      .refine((v) => /^https?:\/\//i.test(v), {
+        message: "imageUrl must be an absolute http(s) URL",
+      })
+      .nullable()
+      .optional(),
+  });
 export const insertStudyTipSchema = createInsertSchema(studyTips).omit({ id: true });
 // userId is owned by the server (set from the authenticated session), so it is
 // omitted from the client-facing insert schema and never trusted from input.
