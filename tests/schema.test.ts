@@ -71,4 +71,36 @@ describe("insertQuestionSchema", () => {
     const { correctAnswer, ...missing } = validRow;
     expect(insertQuestionSchema.safeParse(missing).success).toBe(false);
   });
+
+  it("accepts a valid https imageUrl", () => {
+    const result = insertQuestionSchema.safeParse({
+      ...validRow,
+      imageUrl: "https://cdn.example.com/questions/a.png",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a null imageUrl", () => {
+    expect(insertQuestionSchema.safeParse({ ...validRow, imageUrl: null }).success).toBe(true);
+  });
+
+  it("accepts an absent imageUrl", () => {
+    expect(insertQuestionSchema.safeParse(validRow).success).toBe(true);
+  });
+
+  it("rejects a javascript: imageUrl", () => {
+    const result = insertQuestionSchema.safeParse({
+      ...validRow,
+      imageUrl: "javascript:alert(1)",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a relative-path imageUrl", () => {
+    const result = insertQuestionSchema.safeParse({
+      ...validRow,
+      imageUrl: "questions/a.png",
+    });
+    expect(result.success).toBe(false);
+  });
 });

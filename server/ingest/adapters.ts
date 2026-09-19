@@ -23,6 +23,9 @@ export const CSV_COLUMNS = [
   "explanation",
   "difficulty",
   "textbookRef",
+  // Appended last to preserve existing column positions/back-compat. Optional:
+  // an absolute http(s) image URL for the question (blank -> no image).
+  "imageUrl",
 ] as const;
 
 // A ready-to-fill CSV template: the header row plus one illustrative example.
@@ -44,6 +47,7 @@ export const CSV_TEMPLATE =
     "B",
     "2 + 2 = 4",
     "easy",
+    "",
     "",
   ]
     .map(csvEscape)
@@ -162,12 +166,13 @@ export function csvRowToRaw(row: Record<string, string>): RawRecord {
     explanation: row.explanation,
     difficulty: row.difficulty,
     textbookRef: row.textbookRef,
+    imageUrl: row.imageUrl,
   };
 }
 
-// Documented ALOC v2 item shape. Fields we consume are mapped below; note that
-// `image` is intentionally ignored — the questions schema has no media column,
-// so images are out of scope for this pipeline.
+// Documented ALOC v2 item shape. Fields we consume are mapped below, including
+// `image`, which is carried through to the question's imageUrl (sanitized by
+// the normalizer; ALOC images may be relative and resolve against the ALOC base).
 export interface AlocItem {
   id?: number | string;
   question?: string | null;
@@ -177,7 +182,7 @@ export interface AlocItem {
   examtype?: string | null; // 'utme' | 'wassce' | 'neco' | 'post-utme'
   examyear?: string | null; // year as a string
   subject?: string | null; // subject name
-  image?: string | null; // IGNORED: schema has no media column, out of scope
+  image?: string | null; // question image; may be an absolute URL or a relative ALOC path
 }
 
 // Map an ALOC examtype to the seeded exam body name. Matching is
@@ -207,5 +212,6 @@ export function alocItemToRaw(item: AlocItem): RawRecord {
     optionE: item.option?.e ?? undefined,
     correctAnswer: item.answer ?? undefined,
     explanation: item.solution ?? undefined,
+    image: item.image ?? undefined,
   };
 }

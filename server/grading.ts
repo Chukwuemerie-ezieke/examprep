@@ -5,6 +5,7 @@ import type { Question } from "@shared/schema";
 export interface ReviewItem {
   questionId: number;
   questionText: string;
+  imageUrl: string | null;
   options: { label: string; value: string }[];
   yourAnswer: string | null;
   correctAnswer: string;
@@ -63,6 +64,7 @@ export async function gradeSubmission(
       review.push({
         questionId: qId,
         questionText: "Question unavailable",
+        imageUrl: null,
         options: [],
         yourAnswer,
         correctAnswer: "",
@@ -83,6 +85,7 @@ export async function gradeSubmission(
     review.push({
       questionId: q.id,
       questionText: q.questionText,
+      imageUrl: q.imageUrl,
       options,
       yourAnswer,
       correctAnswer: q.correctAnswer,

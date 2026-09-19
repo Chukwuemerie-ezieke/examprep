@@ -1,4 +1,5 @@
 import { insertQuestionSchema, type InsertQuestion } from "@shared/schema";
+import { sanitizeImageUrl, ALOC_IMAGE_BASE_URL } from "./media";
 
 // PURE, DB-free ingestion core. Mirrors the pattern in server/grading.ts and
 // server/analytics.ts: a pure function the route/storage layer calls, tested
@@ -41,6 +42,10 @@ export interface RawRecord {
   solution?: string | number | null;
   difficulty?: string | number | null;
   textbookRef?: string | number | null;
+  // Question-level image, accepted under both aliases: ALOC uses `image`,
+  // CSV/JSON use `imageUrl`. Sanitized before it reaches the insert contract.
+  image?: string | number | null;
+  imageUrl?: string | number | null;
 }
 
 // Supplied by the caller. The `resolve*` callbacks let the PURE mapping stay
@@ -208,6 +213,13 @@ export function normalizeQuestion(raw: RawRecord, ctx: ResolutionContext): Norma
   const questionNumber = toInt(raw.questionNumber) ?? null;
   const textbookRef = toStr(raw.textbookRef) ?? null;
 
+  // (optional) image: prefer the explicit imageUrl alias, then the ALOC `image`.
+  // Sanitized to an http(s) URL (relative ALOC paths resolve against the ALOC
+  // base); anything unsafe/absent becomes null. Not part of the dedupe key.
+  const imageUrl =
+    sanitizeImageUrl(raw.imageUrl, { baseUrl: ALOC_IMAGE_BASE_URL }) ??
+    sanitizeImageUrl(raw.image, { baseUrl: ALOC_IMAGE_BASE_URL });
+
   // (i) all strings are already trimmed by toStr. (j) validate the assembled
   // object through the authoritative schema and return the parsed data.
   const candidate = {
@@ -217,6 +229,7 @@ export function normalizeQuestion(raw: RawRecord, ctx: ResolutionContext): Norma
     year,
     questionNumber,
     questionText,
+    imageUrl,
     optionA,
     optionB,
     optionC,
