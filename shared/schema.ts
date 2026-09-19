@@ -44,6 +44,9 @@ export const questions = pgTable("questions", {
   year: integer("year").notNull(),
   questionNumber: integer("question_number"),
   questionText: text("question_text").notNull(),
+  // Optional question-level image. Nullable for backward compatibility: existing
+  // rows and inserts without an image stay valid (db:push adds it as NULL).
+  imageUrl: text("image_url"),
   optionA: text("option_a").notNull(),
   optionB: text("option_b").notNull(),
   optionC: text("option_c").notNull(),

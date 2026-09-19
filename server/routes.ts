@@ -25,6 +25,8 @@ import { createResolutionContext } from "./ingest/resolve";
 
 // Strip answer-revealing fields (correctAnswer, explanation, textbookRef) from a
 // question so it is safe to send to the client during an active CBT quiz.
+// imageUrl is intentionally preserved (it is spread through `safe`): an image is
+// part of the question prompt, not an answer, so it must be visible pre-submit.
 function sanitizeQuestionForCbt(q: Question) {
   const { correctAnswer, explanation, textbookRef, ...safe } = q;
   return safe;

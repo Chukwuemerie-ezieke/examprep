@@ -25,6 +25,7 @@ export interface Question {
   year: number;
   questionNumber: number | null;
   questionText: string;
+  imageUrl: string | null;
   optionA: string;
   optionB: string;
   optionC: string;
@@ -44,6 +45,7 @@ export type CbtQuestion = Omit<Question, "correctAnswer" | "explanation" | "text
 export interface CbtReviewItem {
   questionId: number;
   questionText: string;
+  imageUrl: string | null;
   options: { label: string; value: string }[];
   yourAnswer: string | null;
   correctAnswer: string;

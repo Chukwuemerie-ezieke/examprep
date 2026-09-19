@@ -15,6 +15,7 @@ import {
   type AlocItem,
 } from "../server/ingest/adapters";
 import { createResolutionContext } from "../server/ingest/resolve";
+import { sanitizeImageUrl, ALOC_IMAGE_BASE_URL } from "../server/ingest/media";
 import type { IStorage } from "../server/storage";
 
 // Build an in-memory ResolutionContext (no Postgres). Exam bodies are the fixed
@@ -717,5 +718,162 @@ describe("findDuplicateQuestion via matchDuplicate", () => {
       year: 2019,
     });
     expect(miss).toBeUndefined();
+  });
+});
+
+describe("sanitizeImageUrl", () => {
+  it("accepts absolute http and https URLs", () => {
+    expect(sanitizeImageUrl("https://cdn.example.com/a.png")).toBe(
+      "https://cdn.example.com/a.png",
+    );
+    expect(sanitizeImageUrl("http://cdn.example.com/b.jpg")).toBe(
+      "http://cdn.example.com/b.jpg",
+    );
+  });
+
+  it("trims surrounding whitespace before validating", () => {
+    expect(sanitizeImageUrl("  https://cdn.example.com/a.png  ")).toBe(
+      "https://cdn.example.com/a.png",
+    );
+  });
+
+  it("returns null for null/undefined/empty/non-string", () => {
+    expect(sanitizeImageUrl(null)).toBeNull();
+    expect(sanitizeImageUrl(undefined)).toBeNull();
+    expect(sanitizeImageUrl("")).toBeNull();
+    expect(sanitizeImageUrl("   ")).toBeNull();
+    expect(sanitizeImageUrl(123)).toBeNull();
+    expect(sanitizeImageUrl({})).toBeNull();
+  });
+
+  it("rejects non-http(s) schemes (javascript:/data:/ftp:/mailto:)", () => {
+    expect(sanitizeImageUrl("javascript:alert(1)")).toBeNull();
+    expect(sanitizeImageUrl("data:image/png;base64,AAAA")).toBeNull();
+    expect(sanitizeImageUrl("ftp://host/file.png")).toBeNull();
+    expect(sanitizeImageUrl("mailto:someone@example.com")).toBeNull();
+  });
+
+  it("resolves a relative path against the provided base URL", () => {
+    expect(
+      sanitizeImageUrl("questions/abc.png", { baseUrl: ALOC_IMAGE_BASE_URL }),
+    ).toBe("https://questions.aloc.com.ng/questions/abc.png");
+    expect(
+      sanitizeImageUrl("/media/x.jpg", { baseUrl: ALOC_IMAGE_BASE_URL }),
+    ).toBe("https://questions.aloc.com.ng/media/x.jpg");
+  });
+
+  it("returns null for a relative path when no base URL is given", () => {
+    expect(sanitizeImageUrl("questions/abc.png")).toBeNull();
+  });
+});
+
+describe("image ingestion (ALOC / CSV / JSON)", () => {
+  const baseItem: AlocItem = {
+    id: 42,
+    question: "What is the capital of France?",
+    option: { a: "Lagos", b: "Paris", c: "Rome", d: "Berlin" },
+    answer: "b",
+    solution: "Paris is the capital of France.",
+    examtype: "utme",
+    examyear: "2019",
+    subject: "Mathematics",
+    image: null,
+  };
+
+  it("carries an absolute ALOC image through to value.imageUrl", () => {
+    const { ctx } = makeCtx();
+    const result = normalizeQuestion(
+      alocItemToRaw({ ...baseItem, image: "https://cdn.aloc.com/x.png" }),
+      ctx,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.imageUrl).toBe("https://cdn.aloc.com/x.png");
+  });
+
+  it("resolves a relative ALOC image against the ALOC base", () => {
+    const { ctx } = makeCtx();
+    const result = normalizeQuestion(
+      alocItemToRaw({ ...baseItem, image: "questions/img-1.png" }),
+      ctx,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.imageUrl).toBe(
+        "https://questions.aloc.com.ng/questions/img-1.png",
+      );
+    }
+  });
+
+  it("yields imageUrl null when the ALOC image is null or absent", () => {
+    const { ctx } = makeCtx();
+    const withNull = normalizeQuestion(alocItemToRaw({ ...baseItem, image: null }), ctx);
+    expect(withNull.ok).toBe(true);
+    if (withNull.ok) expect(withNull.value.imageUrl).toBeNull();
+
+    const { image, ...noImage } = baseItem;
+    const withAbsent = normalizeQuestion(alocItemToRaw(noImage), ctx);
+    expect(withAbsent.ok).toBe(true);
+    if (withAbsent.ok) expect(withAbsent.value.imageUrl).toBeNull();
+  });
+
+  it("normalizes a CSV imageUrl column to value.imageUrl", () => {
+    const { ctx } = makeCtx();
+    const rows = parseCsv(
+      CSV_COLUMNS.join(",") +
+        "\nWAEC,Mathematics,Algebra,2019,1,What is 2 + 2?,3,4,5,6,,B,2 + 2 = 4,easy,,https://cdn.example.com/q.png",
+    );
+    const result = normalizeQuestion(csvRowToRaw(rows[0]), ctx);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.imageUrl).toBe("https://cdn.example.com/q.png");
+  });
+
+  it("maps a blank CSV imageUrl to null", () => {
+    const { ctx } = makeCtx();
+    const rows = parseCsv(
+      CSV_COLUMNS.join(",") +
+        "\nWAEC,Mathematics,Algebra,2019,1,What is 2 + 2?,3,4,5,6,,B,2 + 2 = 4,easy,,",
+    );
+    const result = normalizeQuestion(csvRowToRaw(rows[0]), ctx);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.imageUrl).toBeNull();
+  });
+
+  it("accepts a JSON/RawRecord under both `imageUrl` and `image` aliases", () => {
+    const { ctx } = makeCtx();
+    const base: RawRecord = {
+      examBody: "WAEC",
+      subject: "Mathematics",
+      year: "2020",
+      questionText: "Q?",
+      optionA: "a",
+      optionB: "b",
+      optionC: "c",
+      optionD: "d",
+      correctAnswer: "A",
+      explanation: "because",
+    };
+    const viaImageUrl = normalizeQuestion(
+      { ...base, imageUrl: "https://cdn.example.com/j.png" },
+      ctx,
+    );
+    expect(viaImageUrl.ok).toBe(true);
+    if (viaImageUrl.ok) {
+      expect(viaImageUrl.value.imageUrl).toBe("https://cdn.example.com/j.png");
+    }
+
+    const viaImage = normalizeQuestion(
+      { ...base, image: "https://cdn.example.com/k.png" },
+      ctx,
+    );
+    expect(viaImage.ok).toBe(true);
+    if (viaImage.ok) expect(viaImage.value.imageUrl).toBe("https://cdn.example.com/k.png");
+
+    // imageUrl wins over image when both are present.
+    const both = normalizeQuestion(
+      { ...base, imageUrl: "https://cdn.example.com/win.png", image: "https://cdn.example.com/lose.png" },
+      ctx,
+    );
+    expect(both.ok).toBe(true);
+    if (both.ok) expect(both.value.imageUrl).toBe("https://cdn.example.com/win.png");
   });
 });
