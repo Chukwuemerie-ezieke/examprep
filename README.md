@@ -14,6 +14,19 @@ admin area** (authorized by the logged-in user's `isAdmin` role) is available
 for managing subjects, topics, questions (including bulk import), and study
 tips.
 
+### Rich question content
+
+Question text, every option, and explanations support **LaTeX math**, rendered
+in the browser with [KaTeX](https://katex.org/). Use `$...$` for inline math and
+`$$...$$` for display math (for example, `$x^2 + y^2 = r^2$`). Text outside the
+delimiters is shown verbatim, and a lone/unmatched `$` is treated as a literal
+character.
+
+A question can also carry an **optional image URL** (`imageUrl`): an absolute
+`http(s)` link to an illustration that renders responsively (and lazily) with
+the question in practice, CBT, and review. This is **paste-a-URL only** — there
+is no upload backend, so images are referenced by URL rather than stored.
+
 ## Stack
 
 **Backend**
@@ -168,7 +181,7 @@ where `errors` is a list of `{ row, message }` (1-based row numbers).
 The canonical column order is:
 
 ```
-examBody,subject,topic,year,questionNumber,questionText,optionA,optionB,optionC,optionD,optionE,correctAnswer,explanation,difficulty,textbookRef
+examBody,subject,topic,year,questionNumber,questionText,optionA,optionB,optionC,optionD,optionE,correctAnswer,explanation,difficulty,textbookRef,imageUrl
 ```
 
 | Column | Required | Notes |
@@ -185,6 +198,7 @@ examBody,subject,topic,year,questionNumber,questionText,optionA,optionB,optionC,
 | `explanation` | No | Falls back to a generic placeholder when empty. |
 | `difficulty` | No | `easy`, `medium`, or `hard`; defaults to `medium`. |
 | `textbookRef` | No | Free-text reference; blank allowed. |
+| `imageUrl` | No | Absolute `http(s)` URL of an illustration shown with the question. Blank means no image; any non-`http(s)` value is rejected (stored as no image). Paste-a-URL only — there is no upload backend. |
 
 ### JSON example
 
@@ -205,7 +219,8 @@ A JSON import is an array of objects referencing entities by name:
     "optionD": "6",
     "correctAnswer": "B",
     "explanation": "Basic arithmetic: 2 + 2 = 4.",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "imageUrl": null
   }
 ]
 ```
@@ -258,8 +273,12 @@ Notes:
 
 - A **live ALOC fetch was not exercised in-sandbox** (no token available); the
   ALOC mapping is covered by fixture unit tests instead.
-- **ALOC images are ignored.** The questions schema has no media column, so the
-  `image` field on ALOC items is intentionally dropped (out of scope).
+- **ALOC images are now ingested.** The `image` field on an ALOC item is mapped
+  into the question's `imageUrl` after URL hygiene: an absolute `http(s)` URL is
+  kept as-is, a **relative** path is resolved against the ALOC base
+  `https://questions.aloc.com.ng`, and any other value (empty, non-string, or a
+  non-`http(s)` scheme such as `javascript:`, `data:`, or `ftp:`) is rejected
+  and stored as no image.
 
 ## Docker
 

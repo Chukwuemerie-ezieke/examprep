@@ -13,6 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import type { ExamBody, Subject, CbtQuestion, CbtReviewItem, CbtGradeResponse } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
+import { RichContent } from "@/components/RichContent";
+import { QuestionImage } from "@/components/QuestionImage";
 
 type Phase = "setup" | "quiz" | "results";
 
@@ -373,10 +375,18 @@ export default function CBT() {
                         {isCorrect ? <CheckCircle2 className="w-3.5 h-3.5 text-white" /> : <XCircle className="w-3.5 h-3.5 text-white" />}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-foreground font-medium mb-1">Q{idx + 1}. {item.questionText}</p>
+                        <p className="text-sm text-foreground font-medium mb-1">Q{idx + 1}. <RichContent text={item.questionText} /></p>
+                        {item.imageUrl && (
+                          <div className="my-2">
+                            <QuestionImage
+                              src={item.imageUrl}
+                              alt={`Question ${idx + 1} illustration`}
+                            />
+                          </div>
+                        )}
                         {!isCorrect && item.yourAnswer && (
                           <p className="text-xs text-red-600 dark:text-red-400 mb-0.5">
-                            Your answer: {item.yourAnswer} — {yourOption?.value}
+                            Your answer: {item.yourAnswer} — <RichContent text={yourOption?.value} />
                           </p>
                         )}
                         {!isCorrect && !item.yourAnswer && item.correctAnswer && (
@@ -386,10 +396,10 @@ export default function CBT() {
                         )}
                         {item.correctAnswer && (
                           <p className="text-xs text-green-600 dark:text-green-400 mb-1">
-                            Correct: {item.correctAnswer} — {correctOption?.value}
+                            Correct: {item.correctAnswer} — <RichContent text={correctOption?.value} />
                           </p>
                         )}
-                        <p className="text-xs text-muted-foreground">{item.explanation}</p>
+                        <p className="text-xs text-muted-foreground"><RichContent text={item.explanation} /></p>
                       </div>
                     </div>
                   </CardContent>
@@ -444,8 +454,17 @@ export default function CBT() {
         {currentQ && (
           <div>
             <p className="text-sm text-foreground font-medium mb-5 leading-relaxed" data-testid="text-question">
-              {currentQ.questionText}
+              <RichContent text={currentQ.questionText} />
             </p>
+
+            {currentQ.imageUrl && (
+              <div className="mb-5">
+                <QuestionImage
+                  src={currentQ.imageUrl}
+                  alt={`Question ${currentIdx + 1} illustration`}
+                />
+              </div>
+            )}
 
             <div className="grid gap-2 mb-6">
               {[
@@ -472,7 +491,7 @@ export default function CBT() {
                     }`}>
                       {opt.label}
                     </span>
-                    <span className="text-sm text-foreground">{opt.value}</span>
+                    <span className="text-sm text-foreground"><RichContent text={opt.value} /></span>
                   </button>
                 );
               })}

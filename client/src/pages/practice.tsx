@@ -11,6 +11,8 @@ import { apiRequest } from "@/lib/queryClient";
 import type { ExamBody, Subject, Topic, Question } from "@/lib/types";
 import { PerplexityAttribution } from "@/components/PerplexityAttribution";
 import { PageHeader } from "@/components/PageHeader";
+import { RichContent } from "@/components/RichContent";
+import { QuestionImage } from "@/components/QuestionImage";
 
 export default function Practice() {
   const [examBodyId, setExamBodyId] = useState("");
@@ -192,8 +194,17 @@ export default function Practice() {
                       </div>
 
                       <p className="text-sm text-foreground font-medium mb-4 leading-relaxed">
-                        {q.questionText}
+                        <RichContent text={q.questionText} />
                       </p>
+
+                      {q.imageUrl && (
+                        <div className="mb-4">
+                          <QuestionImage
+                            src={q.imageUrl}
+                            alt={`Question ${currentPage * pageSize + idx + 1} illustration`}
+                          />
+                        </div>
+                      )}
 
                       <div className="grid gap-2 mb-4">
                         {[
@@ -240,7 +251,7 @@ export default function Practice() {
                                   opt.label
                                 )}
                               </span>
-                              <span className="text-sm text-foreground">{opt.value}</span>
+                              <span className="text-sm text-foreground"><RichContent text={opt.value} /></span>
                             </button>
                           );
                         })}
@@ -267,7 +278,7 @@ export default function Practice() {
                               Answer: {q.correctAnswer}
                             </Badge>
                           </div>
-                          <p className="text-sm text-foreground leading-relaxed mb-2">{q.explanation}</p>
+                          <p className="text-sm text-foreground leading-relaxed mb-2"><RichContent text={q.explanation} /></p>
                           {q.textbookRef && (
                             <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                               <BookOpen className="w-3 h-3" />

@@ -24,7 +24,7 @@ const EMPTY_Q = {
   year: new Date().getFullYear(),
   questionText: "", optionA: "", optionB: "", optionC: "", optionD: "", optionE: "",
   correctAnswer: "A", explanation: "", difficulty: "medium",
-  textbookRef: "",
+  textbookRef: "", imageUrl: "",
 };
 
 function QuestionForm({
@@ -40,6 +40,7 @@ function QuestionForm({
     ...initial,
     optionE: initial.optionE || "",
     textbookRef: initial.textbookRef || "",
+    imageUrl: initial.imageUrl || "",
   } : EMPTY_Q);
   const [saving, setSaving] = useState(false);
 
@@ -49,6 +50,7 @@ function QuestionForm({
       const payload = { ...form };
       if (!payload.optionE) delete payload.optionE;
       if (!payload.topicId) payload.topicId = null;
+      if (!payload.imageUrl) payload.imageUrl = null;
       const url = initial
         ? `/api/admin/questions/${initial.id}`
         : `/api/admin/questions`;
@@ -113,6 +115,9 @@ function QuestionForm({
         <div>
           <Label className="text-xs">Question Text</Label>
           <Textarea rows={2} value={form.questionText} onChange={(e) => setForm({ ...form, questionText: e.target.value })} />
+          <p className="text-[10px] text-muted-foreground mt-1">
+            LaTeX is supported in the question, options, and explanation: use <code>$...$</code> for inline math and <code>$$...$$</code> for display math.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -150,6 +155,18 @@ function QuestionForm({
         <div>
           <Label className="text-xs">Explanation</Label>
           <Textarea rows={3} value={form.explanation} onChange={(e) => setForm({ ...form, explanation: e.target.value })} />
+        </div>
+
+        <div>
+          <Label className="text-xs">Image URL (optional)</Label>
+          <Input
+            value={form.imageUrl}
+            onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+            placeholder="https://example.com/diagram.png"
+          />
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Paste an absolute http(s) image URL to show a diagram above the options. Leave blank for none.
+          </p>
         </div>
 
         <div className="flex justify-end gap-2">
@@ -467,11 +484,11 @@ function SubjectsTab({ subjects }: { subjects: Subject[] }) {
 // Kept inline so the client does not import server code. topic, questionNumber,
 // optionE, explanation, difficulty and textbookRef are optional.
 const CSV_HEADER =
-  "examBody,subject,topic,year,questionNumber,questionText,optionA,optionB,optionC,optionD,optionE,correctAnswer,explanation,difficulty,textbookRef";
+  "examBody,subject,topic,year,questionNumber,questionText,optionA,optionB,optionC,optionD,optionE,correctAnswer,explanation,difficulty,textbookRef,imageUrl";
 const CSV_TEMPLATE =
   CSV_HEADER +
   "\n" +
-  "WAEC,Mathematics,Algebra,2019,1,What is 2 + 2?,3,4,5,6,,B,2 + 2 = 4,easy,";
+  "WAEC,Mathematics,Algebra,2019,1,What is 2 + 2?,3,4,5,6,,B,2 + 2 = 4,easy,,";
 
 // JSON sample references exam body / subject / topic BY NAME (not numeric ids).
 const JSON_SAMPLE = `[
@@ -488,7 +505,8 @@ const JSON_SAMPLE = `[
     "optionD": "6",
     "correctAnswer": "B",
     "explanation": "Basic arithmetic: 2 + 2 = 4.",
-    "difficulty": "easy"
+    "difficulty": "easy",
+    "imageUrl": null
   }
 ]`;
 
