@@ -19,6 +19,9 @@ import {
 import { hashPassword } from "./auth";
 import { gradeSubmission } from "./grading";
 import { computeAnalytics } from "./analytics";
+import { normalizeQuestion, computeDedupeKey, type RawRecord } from "./ingest/normalize";
+import { parseCsv, csvRowToRaw } from "./ingest/adapters";
+import { createResolutionContext } from "./ingest/resolve";
 
 // Strip answer-revealing fields (correctAnswer, explanation, textbookRef) from a
 // question so it is safe to send to the client during an active CBT quiz.
@@ -47,6 +50,15 @@ const gradeSubmissionSchema = z.object({
   questionIds: z.array(z.number().int().positive()).max(MAX_QUESTION_LIMIT).optional(),
   answers: z.record(z.string(), z.string()),
   timeSpentSeconds: z.number().int().nonnegative().optional(),
+});
+
+// Top-level envelope for the name-aware question import endpoint. `format`
+// selects the parser; `data` is CSV text (string) for 'csv', or a JSON array
+// (or a JSON string of an array) for 'json'. Per-row validation is handled by
+// the pure normalizer, not here.
+const importEnvelopeSchema = z.object({
+  format: z.enum(["csv", "json"]),
+  data: z.union([z.string(), z.array(z.unknown())]),
 });
 
 // Require an authenticated session. Fails safe: 401 when not logged in.
@@ -427,6 +439,81 @@ export async function registerRoutes(
       }
     }
     res.json({ created, total: items.length, errors });
+  });
+
+  // Name-aware question import. Accepts CSV text or a JSON array, resolves exam
+  // bodies/subjects/topics by NAME (numeric ids still accepted for back-compat),
+  // auto-creates unknown subjects/topics, rejects unknown exam bodies, and
+  // de-duplicates against existing questions. Returns a per-row report. The
+  // legacy /bulk route above is intentionally left unchanged.
+  app.post("/api/admin/questions/import", requireAdmin, async (req, res) => {
+    const envelope = validateBody(importEnvelopeSchema, req, res);
+    if (!envelope) return;
+
+    // Parse the envelope's data into a flat RawRecord[] per the declared format.
+    let records: RawRecord[];
+    try {
+      if (envelope.format === "csv") {
+        if (typeof envelope.data !== "string") {
+          return res.status(400).json({ message: "For format 'csv', data must be a CSV string." });
+        }
+        records = parseCsv(envelope.data).map(csvRowToRaw);
+      } else {
+        // format === 'json': data is a JSON array, or a JSON string of an array.
+        let arr: unknown = envelope.data;
+        if (typeof arr === "string") {
+          try {
+            arr = JSON.parse(arr);
+          } catch {
+            return res.status(400).json({ message: "For format 'json', data string must be valid JSON." });
+          }
+        }
+        if (!Array.isArray(arr)) {
+          return res.status(400).json({ message: "For format 'json', data must be an array." });
+        }
+        records = arr as RawRecord[];
+      }
+    } catch (e: any) {
+      return res.status(400).json({ message: e?.message ?? "Failed to parse import data." });
+    }
+
+    // Build the DB-backed ResolutionContext once (pre-pass auto-creates missing
+    // subjects/topics), then normalize + dedupe + persist each record.
+    let created = 0;
+    let skippedDuplicates = 0;
+    const errors: { row: number; message: string }[] = [];
+    try {
+      const ctx = await createResolutionContext(storage, records);
+      for (let i = 0; i < records.length; i++) {
+        const row = i + 1; // 1-based row number for reporting.
+        const result = normalizeQuestion(records[i], ctx);
+        if (!result.ok) {
+          errors.push({ row, message: result.error });
+          continue;
+        }
+        // Per-row try/catch so a single bad insert cannot abort the batch.
+        try {
+          const dup = await storage.findDuplicateQuestion({
+            questionText: result.value.questionText,
+            examBodyId: result.value.examBodyId,
+            subjectId: result.value.subjectId,
+            year: result.value.year,
+          });
+          if (dup) {
+            skippedDuplicates++;
+            continue;
+          }
+          await storage.createQuestion(result.value);
+          created++;
+        } catch (e: any) {
+          errors.push({ row, message: e?.message ?? "Failed to persist row." });
+        }
+      }
+    } catch (e: any) {
+      return res.status(500).json({ message: e?.message ?? "Import failed." });
+    }
+
+    res.json({ created, skippedDuplicates, total: records.length, errors });
   });
 
   // Study tip CRUD
