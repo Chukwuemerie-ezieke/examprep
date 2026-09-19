@@ -55,6 +55,11 @@ export default function Home() {
                   <LineChart className="w-3 h-3" /> Analytics
                 </Button>
               </Link>
+              <Link href="/leaderboard">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs" data-testid="link-leaderboard">
+                  <Trophy className="w-3 h-3" /> Leaderboard
+                </Button>
+              </Link>
               {user.isAdmin && (
                 <Link href="/admin">
                   <Button variant="ghost" size="sm" className="text-xs" data-testid="link-admin-top">
@@ -74,11 +79,18 @@ export default function Home() {
               </Button>
             </>
           ) : (
-            <Link href="/auth">
-              <Button variant="outline" size="sm" className="gap-1 text-xs" data-testid="link-auth">
-                <LogIn className="w-3 h-3" /> Sign in
-              </Button>
-            </Link>
+            <>
+              <Link href="/leaderboard">
+                <Button variant="ghost" size="sm" className="gap-1 text-xs" data-testid="link-leaderboard">
+                  <Trophy className="w-3 h-3" /> Leaderboard
+                </Button>
+              </Link>
+              <Link href="/auth">
+                <Button variant="outline" size="sm" className="gap-1 text-xs" data-testid="link-auth">
+                  <LogIn className="w-3 h-3" /> Sign in
+                </Button>
+              </Link>
+            </>
           )}
         </div>
       </div>

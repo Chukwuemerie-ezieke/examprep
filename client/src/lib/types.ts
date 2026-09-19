@@ -71,6 +71,7 @@ export interface User {
   email: string;
   displayName: string | null;
   isAdmin: boolean;
+  showOnLeaderboard: boolean;
   createdAt: string;
 }
 
@@ -159,4 +160,34 @@ export interface Analytics {
   perExamBody: GroupBreakdown[];
   overall: OverallStats;
   weakTopics: WeakTopic[];
+}
+
+// Leaderboard response types — mirror server/leaderboard.ts (GET /api/leaderboard)
+// EXACTLY. Privacy: entries carry ONLY a display label + aggregate metrics,
+// never email or a raw userId.
+export interface LeaderboardEntry {
+  rank: number;
+  label: string;
+  avgScore: number;
+  completedSessions: number;
+  questionsAnswered: number;
+}
+
+// The authenticated viewer's own standing. `rank` is null when unranked; the
+// flags explain why (optedIn / belowThreshold) so the client can nudge.
+export interface LeaderboardMeRow {
+  rank: number | null;
+  label: string;
+  avgScore: number;
+  completedSessions: number;
+  questionsAnswered: number;
+  ranked: boolean;
+  optedIn: boolean;
+  belowThreshold: boolean;
+}
+
+// `me` is populated only for authenticated viewers; null for anonymous callers.
+export interface LeaderboardResponse {
+  entries: LeaderboardEntry[];
+  me: LeaderboardMeRow | null;
 }
